@@ -18,7 +18,7 @@ marker=/etc/wireguard/.wg-auto-managed
 install_panel() {
   local bootstrap
   bootstrap=$(mktemp /tmp/wg-auto-panel.XXXXXXXX.sh)
-  if ! curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/asalabanowwaw/wireguard-host-probe/main/update.sh -o "$bootstrap"; then
+  if ! curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/update.sh -o "$bootstrap"; then
     rm -f "$bootstrap"
     die 'VPN is preserved, but the panel download failed. Rerun this installer to retry.'
   fi

@@ -20,18 +20,18 @@ install -d -m 700 "$base/releases" /etc/wireguard/wg-auto-panel
 stage=$(mktemp -d "$base/releases/stage.XXXXXXXX")
 cleanup() { [[ -z ${stage:-} ]] || rm -rf -- "$stage"; }
 trap cleanup EXIT
-repo=https://api.github.com/repos/asalabanowwaw/wireguard-host-probe/commits/main
+repo=https://api.github.com/repos/BlueKnightNet/Blue-Knight-WG-Panel/commits/blue-knight-net
 sha=$(curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 "$repo" | python3 -c 'import json,sys; print(json.load(sys.stdin)["sha"])')
 [[ $sha =~ ^[a-f0-9]{40}$ ]] || { echo 'Invalid release commit.'; exit 1; }
 old=$(readlink -f "$base/current" || true)
 release="$base/releases/$sha"
 # Reapply service/firewall setup even at the current release, so rerunning this
 # command can repair a stopped service or an interrupted HTTP-to-HTTPS migration.
-curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 "https://codeload.github.com/asalabanowwaw/wireguard-host-probe/tar.gz/$sha" -o "$stage/source.tgz"
+curl -fsSL --retry 2 --connect-timeout 10 --max-time 60 "https://codeload.github.com/BlueKnightNet/Blue-Knight-WG-Panel/tar.gz/$sha" -o "$stage/source.tgz"
 tar -xzf "$stage/source.tgz" -C "$stage" --strip-components=1 \
-  "wireguard-host-probe-$sha/panel.py" \
-  "wireguard-host-probe-$sha/panel.html" \
-  "wireguard-host-probe-$sha/update.sh"
+  "Blue-Knight-WG-Panel-$sha/panel.py" \
+  "Blue-Knight-WG-Panel-$sha/panel.html" \
+  "Blue-Knight-WG-Panel-$sha/update.sh"
 rm "$stage/source.tgz"
 python3 -m py_compile "$stage/panel.py"
 bash -n "$stage/update.sh"
