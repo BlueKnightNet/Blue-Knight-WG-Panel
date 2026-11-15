@@ -576,6 +576,102 @@ class PanelTests(unittest.TestCase):
         self.assertEqual(panel.load('amneziawg')['clients'], [])
         self.assertEqual(panel.load('amneziawg')['port'], 51821)
 
+    def test_conf_starts_with_interface_on_low_mtu_and_all_dns_zip(self):
+        import io, zipfile
+        path = '/api/clients/0123456789abcdef/'
+        self.assertEqual(self.request(path + 'tuning', dict(profile='custom', mtu=1200, keepalive=25)).status, 200)
+        config = self.request(path + 'config').read().decode()
+        self.assertTrue(config.startswith('[Interface]\n'))
+        self.assertIn('IPv6 is not captured', config)
+        with patch.object(panel, 'run', side_effect=lambda *args, data=None: data):
+            qr_data = self.request(path + 'qr.svg').read().decode()
+        self.assertTrue(qr_data.startswith('[Interface]\n'))
+        with zipfile.ZipFile(io.BytesIO(self.request(path + 'dns.zip').read())) as archive:
+            for name in archive.namelist():
+                if name.endswith('.conf'):
+                    entry = archive.read(name).decode()
+                    self.assertTrue(entry.startswith('[Interface]\n'), name)
+                    self.assertIn('# DNS preset:', entry)
+
+    def test_psk_optional_on_create_and_toggle_and_omits_from_exports(self):
+        self.assertEqual(self.request('/api/clients', dict(name='bad-psk', pskEnabled='false')).status, 400)
+        self.assertEqual(self.request('/api/clients', dict(name='v2ray-no-psk', pskEnabled=False)).status, 200)
+        state = panel.load()
+        created = next(c for c in state['clients'] if c['name'] == 'v2ray-no-psk')
+        self.assertFalse(created['pskEnabled'])
+        self.assertEqual(created['psk'], '')
+        server_conf = panel.CONFIG.read_text()
+        self.assertIn('PresharedKey = shared', server_conf)
+        peer_block = next(b for b in server_conf.split('[Peer]') if '10.203.240.4/32' in b)
+        self.assertNotIn('PresharedKey', peer_block)
+
+        base = '/api/clients/' + created['id'] + '/'
+        conf = self.request(base + 'config').read().decode()
+        self.assertNotIn('PresharedKey', conf)
+        uri = urlsplit(self.request(base + 'uri').read().decode().strip())
+        self.assertNotIn('presharedkey', parse_qs(uri.query))
+        for endpoint in ('xray', 'compatible'):
+            exported = json.load(self.request(base + endpoint))
+            self.assertNotIn('preSharedKey', exported['outbounds'][0]['settings']['peers'][0])
+
+        status = json.load(self.request('/api/status'))
+        status_created = next(c for c in status['clients'] if c['id'] == created['id'])
+        self.assertFalse(status_created['pskEnabled'])
+        self.assertNotIn('shared', json.dumps(status))
+
+        self.assertEqual(self.request(base + 'details', dict(pskEnabled=True)).status, 200)
+        self.assertIn('PresharedKey = new-psk', self.request(base + 'config').read().decode())
+        self.assertEqual(parse_qs(urlsplit(self.request(base + 'uri').read().decode().strip()).query)['presharedkey'], ['new-psk'])
+        self.assertEqual(json.load(self.request(base + 'xray'))['outbounds'][0]['settings']['peers'][0]['preSharedKey'], 'new-psk')
+
+        existing_base = '/api/clients/0123456789abcdef/'
+        self.assertEqual(self.request(existing_base + 'details', dict(pskEnabled='false')).status, 400)
+        self.assertEqual(self.request(existing_base + 'details', dict(pskEnabled=False)).status, 200)
+        self.assertNotIn('PresharedKey = shared', panel.CONFIG.read_text())
+        self.assertNotIn('PresharedKey', self.request(existing_base + 'config').read().decode())
+        self.assertEqual(self.request(existing_base + 'details', dict(pskEnabled=True)).status, 200)
+        self.assertIn('PresharedKey = shared', panel.CONFIG.read_text())
+
+        self.prepare_awg()
+        self.assertEqual(self.request('/api/awg/clients', dict(name='awg-no-psk', pskEnabled=False)).status, 400)
+        self.assertEqual(self.request('/api/awg/clients/0123456789abcdef/details', dict(pskEnabled=False)).status, 400)
+
+    def test_uri_qr_export_and_awg_rejection(self):
+        path = '/api/clients/0123456789abcdef/uri-qr.svg'
+        self.assertEqual(self.request(path, auth=False).status, 401)
+        def qr(*args, data=None):
+            self.assertEqual(args, ('qrencode', '-t', 'SVG', '-m', '2'))
+            self.assertTrue(data.startswith('wireguard://'))
+            return '<svg xmlns="http://www.w3.org/2000/svg"></svg>'
+        with patch.object(panel, 'run', side_effect=qr):
+            response = self.request(path)
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.headers['Content-Type'], 'image/svg+xml')
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        with patch.object(panel, 'run', side_effect=FileNotFoundError):
+            self.assertEqual(self.request(path).status, 503)
+        self.prepare_awg()
+        self.assertEqual(self.request('/api/awg/clients/0123456789abcdef/uri-qr.svg').status, 400)
+
+    def test_xray_config_avoids_dns_deadlock_and_warns_on_private_dns(self):
+        domain_xray = json.load(self.request('/api/clients/0123456789abcdef/xray'))
+        tags = {o['tag']: o['protocol'] for o in domain_xray['outbounds']}
+        self.assertEqual(tags.get('direct'), 'freedom')
+        self.assertEqual(domain_xray['dns']['tag'], 'dns-internal')
+        self.assertEqual(domain_xray['dns']['servers'][0], dict(address='localhost', domains=['full:vpn.example.com'], skipFallback=True))
+        self.assertEqual(domain_xray['outbounds'][0]['settings']['remoteDNS'], ['1.1.1.1'])
+        self.assertEqual(domain_xray['routing']['rules'][1], dict(type='field', inboundTag=['dns-internal'], outboundTag='direct'))
+
+        self.assertEqual(self.request('/api/settings', dict(host='203.0.113.10', port=51820, dns='1.1.1.1', mtu=1280)).status, 200)
+        ip_xray = json.load(self.request('/api/clients/0123456789abcdef/xray'))
+        self.assertEqual(ip_xray['dns']['servers'], ['1.1.1.1'])
+        self.assertEqual(ip_xray['routing']['rules'], [dict(type='field', ip=['::/0'], outboundTag='block')])
+
+        self.assertEqual(self.request('/api/clients/0123456789abcdef/tuning', dict(profile='default', dns='10.202.10.202')).status, 200)
+        status = json.load(self.request('/api/status'))
+        hints = status['clients'][0]['hints']
+        self.assertTrue(any(h['level'] == 'warning' and 'private IPv4' in h['text'] for h in hints))
+
     def test_public_https_with_generated_certificate(self):
         openssl = os.environ.get('OPENSSL_BINARY') or shutil.which('openssl')
         if not openssl:
