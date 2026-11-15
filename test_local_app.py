@@ -30,6 +30,17 @@ class LocalTests(unittest.TestCase):
             self.assertEqual(result['state']['host'], '192.0.2.1')
             self.assertEqual(result['client']['tuning']['mtu'], 1360)
 
+    def test_no_psk_formats_round_trip(self):
+        source = fixture()
+        source['client']['pskEnabled'] = False
+        for text in [panel.client_config(source['state'], source['client']),
+                     panel.share_uri(source['state'], source['client']),
+                     json.dumps(panel.xray_config(source['state'], source['client']))]:
+            result = local_app.parse_config(text)
+            self.assertEqual(result['client']['psk'], '')
+            xray = panel.xray_config(result['state'], result['client'])
+            self.assertNotIn('preSharedKey', xray['outbounds'][0]['settings']['peers'][0])
+
     def test_bad_keys_and_endpoints_rejected(self):
         source = fixture()
         text = panel.client_config(source['state'], source['client'])

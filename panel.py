@@ -424,12 +424,39 @@ def limits_worker():
         time.sleep(5)
 
 
+def client_psk(c):
+    return (c.get('psk') or '') if c.get('pskEnabled', True) else ''
+
+
+def is_ip_address(value):
+    try:
+        ipaddress.ip_address(str(value).strip().strip('[]'))
+        return True
+    except ValueError:
+        return False
+
+
+def endpoint_host(host):
+    host = str(host).strip()
+    bare = host.strip('[]')
+    try:
+        addr = ipaddress.ip_address(bare)
+        return f'[{addr}]' if addr.version == 6 else str(addr)
+    except ValueError:
+        return bare
+
+
 def render_server(state):
     blocks = list(state['unmanaged'])
     for c in state['clients']:
         if not c.get('enabled', True) or limit_reason(c):
             continue
-        blocks.append(f"PublicKey = {c['public']}\nPresharedKey = {c['psk']}\nAllowedIPs = {c['address']}/32")
+        lines = [f"PublicKey = {c['public']}"]
+        psk = client_psk(c)
+        if psk:
+            lines.append(f"PresharedKey = {psk}")
+        lines.append(f"AllowedIPs = {c['address']}/32")
+        blocks.append('\n'.join(lines))
     return state['header'] + '\n\n' + ''.join('[Peer]\n' + b + '\n\n' for b in blocks)
 
 
@@ -486,19 +513,19 @@ def client_config(state, c):
     low_mtu = tuning['mtu'] < 1280
     warning = '# IPv4-only low-MTU profile. IPv6 is not captured and may bypass this VPN.\n' if low_mtu else ''
     routes = '0.0.0.0/0' if low_mtu else '0.0.0.0/0, ::/0'
-    return f"""{warning}[Interface]
-PrivateKey = {c['private']}
-Address = {c['address']}/32
-DNS = {tuning['dns']}
-{mtu_line}
-
-[Peer]
-PublicKey = {state['serverPublic']}
-PresharedKey = {c['psk']}
-Endpoint = {state['host']}:{state['port']}
-AllowedIPs = {routes}
-PersistentKeepalive = {tuning['keepalive']}
-"""
+    psk = client_psk(c)
+    peer_lines = [f"PublicKey = {state['serverPublic']}"]
+    if psk:
+        peer_lines.append(f"PresharedKey = {psk}")
+    peer_lines.extend([
+        f"Endpoint = {endpoint_host(state['host'])}:{state['port']}",
+        f"AllowedIPs = {routes}",
+        f"PersistentKeepalive = {tuning['keepalive']}",
+    ])
+    return (
+        f"[Interface]\nPrivateKey = {c['private']}\nAddress = {c['address']}/32\n"
+        f"DNS = {tuning['dns']}\n{mtu_line}\n\n[Peer]\n" + '\n'.join(peer_lines) + '\n' + warning
+    )
 
 
 def effective_tuning(state, c):
@@ -576,10 +603,14 @@ def share_uri(state, client):
     if state.get('protocol') == 'amneziawg':
         raise ValueError('Use an AmneziaWG 3.1 compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
     tuning = effective_tuning(state, client)
-    query = urlencode(dict(publickey=state['serverPublic'], presharedkey=client['psk'],
-                           address=client['address'] + '/32', mtu=tuning['mtu'],
-                           dns=tuning['dns'].replace(' ', ''), reserved='0,0,0'), quote_via=quote)
-    return 'wireguard://' + quote(client['private'], safe='') + '@' + state['host'] + ':' + str(state['port']) + '?' + query + '#' + quote(client['name'], safe='')
+    params = dict(publickey=state['serverPublic'])
+    psk = client_psk(client)
+    if psk:
+        params['presharedkey'] = psk
+    params.update(address=client['address'] + '/32', mtu=tuning['mtu'],
+                  dns=tuning['dns'].replace(' ', ''), reserved='0,0,0')
+    query = urlencode(params, quote_via=quote)
+    return 'wireguard://' + quote(client['private'], safe='') + '@' + endpoint_host(state['host']) + ':' + str(state['port']) + '?' + query + '#' + quote(client['name'], safe='')
 
 
 def xray_config(state, client):
@@ -587,15 +618,28 @@ def xray_config(state, client):
         raise ValueError('Use an AmneziaWG 3.1 compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
     tuning = effective_tuning(state, client)
     dns = [x.strip() for x in tuning['dns'].split(',')]
-    return dict(log=dict(loglevel='warning'), dns=dict(servers=dns, queryStrategy='UseIPv4'),
+    host = endpoint_host(state['host'])
+    peer = dict(endpoint=host + ':' + str(state['port']), publicKey=state['serverPublic'],
+                keepAlive=tuning['keepalive'], allowedIPs=['0.0.0.0/0'])
+    psk = client_psk(client)
+    if psk:
+        peer['preSharedKey'] = psk
+    dns_servers = list(dns)
+    routing_rules = [dict(type='field', ip=['::/0'], outboundTag='block')]
+    dns_config = dict(servers=dns_servers, queryStrategy='UseIPv4')
+    if not is_ip_address(host):
+        dns_servers.insert(0, dict(address='localhost', domains=['full:' + host], skipFallback=True))
+        dns_config['tag'] = 'dns-internal'
+        routing_rules.append(dict(type='field', inboundTag=['dns-internal'], outboundTag='direct'))
+    return dict(log=dict(loglevel='warning'), dns=dns_config,
         inbounds=[dict(tag='mixed', listen='127.0.0.1', port=10808, protocol='mixed', settings=dict(auth='noauth', udp=True)),
                   dict(tag='http', listen='127.0.0.1', port=10809, protocol='http', settings={})],
         outbounds=[dict(tag='proxy', protocol='wireguard', settings=dict(secretKey=client['private'],
             address=[client['address'] + '/32'], mtu=tuning['mtu'], noKernelTun=True,
-            remoteDNS=dns, peers=[dict(endpoint=state['host'] + ':' + str(state['port']),
-                publicKey=state['serverPublic'], preSharedKey=client['psk'], keepAlive=tuning['keepalive'], allowedIPs=['0.0.0.0/0'])])),
-            dict(tag='block', protocol='blackhole', settings={})],
-        routing=dict(domainStrategy='AsIs', rules=[dict(type='field', ip=['::/0'], outboundTag='block')]))
+            remoteDNS=dns, peers=[peer])),
+            dict(tag='block', protocol='blackhole', settings={}),
+            dict(tag='direct', protocol='freedom', settings={})],
+        routing=dict(domainStrategy='AsIs', rules=routing_rules))
 
 
 def diagnostics(state):
@@ -675,13 +719,15 @@ def client_metrics(state, peers, now=None):
             tuning = effective_tuning(state, client)
             if tuning['mtu'] < 1280:
                 hints.append(dict(level='warning', text='Native config is IPv4-only below MTU 1280. IPv6 can bypass the VPN unless blocked on the device.'))
+            if any(ipaddress.ip_address(x.strip()).is_private for x in tuning['dns'].split(',') if x.strip()):
+                hints.append(dict(level='warning', text='DNS uses a private IPv4 address that is usually unreachable from a foreign VPS. Use public DNS for WireGuard/v2ray.'))
             if changes >= 2:
                 hints.append(dict(level='info', text='Peer endpoint changed repeatedly. Check network switching or two apps sharing the same client keys.'))
             received_rate += down
             sent_rate += up
             clients.append(dict(id=client['id'], name=client['name'], address=client['address'], enabled=enabled,
                 recent=recent, status='paused' if not enabled else ('recent' if recent else ('idle' if handshake else 'new')),
-                quotaBytes=client.get('quotaBytes', 0), usedBytes=client.get('usedBytes', 0), expiresAt=client.get('expiresAt', 0), limitReason=limit_reason(client), tuning=tuning, dnsOverride=client.get('tuning', {}).get('dns', ''), receivedRate=round(down),
+                quotaBytes=client.get('quotaBytes', 0), usedBytes=client.get('usedBytes', 0), expiresAt=client.get('expiresAt', 0), limitReason=limit_reason(client), tuning=tuning, dnsOverride=client.get('tuning', {}).get('dns', ''), pskEnabled=bool(client_psk(client)), receivedRate=round(down),
                 sentRate=round(up), endpointChanges=changes, hints=hints, **peer))
         known = {c['id'] for c in state['clients']}
         for key in list(samples):
@@ -866,7 +912,7 @@ class Handler(BaseHTTPRequestHandler):
                     listenPort=fields(state['header'])['ListenPort'], error=error,
                     version=Path(__file__).with_name('VERSION').read_text().strip(),
                     unmanaged=len(state['unmanaged']), **client_metrics(state, peers)))
-            match = re.fullmatch(r'/api/clients/([a-f0-9]{16})/(config|dns.zip|uri|xray|compatible|qr\.svg)', self.path)
+            match = re.fullmatch(r'/api/clients/([a-f0-9]{16})/(config|dns\.zip|uri|xray|compatible|qr\.svg|uri-qr\.svg)', self.path)
             if match:
                 c = next((c for c in state['clients'] if c['id'] == match[1]), None)
                 if c:
@@ -879,12 +925,13 @@ class Handler(BaseHTTPRequestHandler):
                             for key, preset in presets.items():
                                 tag = re.sub(r'[^A-Za-z0-9_-]', '-', key)[:60]
                                 variant = dict(c, tuning={**c.get('tuning', {}), 'dns': preset['dns']})
-                                archive.writestr(tag + '-' + c['name'] + '.conf', '# DNS preset: ' + preset['label'] + '\n' + client_config(state, variant))
+                                archive.writestr(tag + '-' + c['name'] + '.conf', client_config(state, variant) + '# DNS preset: ' + preset['label'] + '\n')
                             archive.writestr('README.txt', 'These profiles share one client key. Activate only one at a time. DNS availability depends on the VPN exit network. Private Iranian resolvers may be unreachable from a foreign VPS.\n')
                         return self.send(200, output.getvalue(), 'application/zip', c['name'] + '-all-dns.zip')
-                    if match[2] == 'qr.svg':
+                    if match[2] in ('qr.svg', 'uri-qr.svg'):
+                        payload = share_uri(state, c) if match[2] == 'uri-qr.svg' else client_config(state, c)
                         try:
-                            svg = run('qrencode', '-t', 'SVG', '-m', '2', data=client_config(state, c))
+                            svg = run('qrencode', '-t', 'SVG', '-m', '2', data=payload)
                         except FileNotFoundError:
                             return self.send(503, {'error': 'Install qrencode on the VPS to enable QR exports.'})
                         return self.send(200, svg, 'image/svg+xml')
@@ -956,6 +1003,7 @@ class Handler(BaseHTTPRequestHandler):
                 client = next((c for c in state['clients'] if c['id'] == details_match[1]), None)
                 if not client:
                     raise ValueError('Client not found.')
+                needs_save = False
                 if 'quotaBytes' in body or 'expiresAt' in body or body.get('resetUsage'):
                     account_usage(state)
                     for key in ('quotaBytes', 'expiresAt'):
@@ -967,7 +1015,7 @@ class Handler(BaseHTTPRequestHandler):
                     if body.get('resetUsage') is True:
                         client['usedBytes'] = 0
                     client['limitBlocked'] = limit_reason(client)
-                    save(state)
+                    needs_save = True
                 if 'name' in body:
                     name = str(body['name']).strip()
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', name):
@@ -979,6 +1027,17 @@ class Handler(BaseHTTPRequestHandler):
                     if not isinstance(body['enabled'], bool):
                         raise ValueError('Enabled must be true or false.')
                     client['enabled'] = body['enabled']
+                    needs_save = True
+                if 'pskEnabled' in body:
+                    if not isinstance(body['pskEnabled'], bool):
+                        raise ValueError('PresharedKey setting must be true or false.')
+                    if state.get('protocol') == 'amneziawg' and not body['pskEnabled']:
+                        raise ValueError('PresharedKey toggle is only supported for WireGuard.')
+                    if body['pskEnabled'] and not client.get('psk'):
+                        client['psk'] = run(engine(state)[0], 'genpsk')
+                    client['pskEnabled'] = body['pskEnabled']
+                    needs_save = True
+                if needs_save:
                     save(state)
                 else:
                     atomic(state_path(state), json.dumps(state))
@@ -1027,10 +1086,19 @@ class Handler(BaseHTTPRequestHandler):
                 address = next((str(a) for a in list(ipaddress.ip_network(state['network']).hosts())[1:] if str(a) not in used), None)
                 if not address:
                     raise ValueError('No client addresses remain.')
+                psk_enabled = body.get('pskEnabled', True)
+                if not isinstance(psk_enabled, bool):
+                    raise ValueError('PresharedKey setting must be true or false.')
+                if state.get('protocol') == 'amneziawg' and not psk_enabled:
+                    raise ValueError('PresharedKey toggle is only supported for WireGuard.')
                 command = engine(state)[0]
                 private = run(command, 'genkey')
-                state['clients'].append(dict(id=secrets.token_hex(8), name=name, private=private,
-                    public=run(command, 'pubkey', data=private + '\n'), psk=run(command, 'genpsk'), address=address))
+                entry = dict(id=secrets.token_hex(8), name=name, private=private,
+                    public=run(command, 'pubkey', data=private + '\n'),
+                    psk=run(command, 'genpsk') if psk_enabled else '', address=address)
+                if not psk_enabled:
+                    entry['pskEnabled'] = False
+                state['clients'].append(entry)
                 save(state)
                 audit('Created client ' + name)
             elif self.path == '/api/revoke':
