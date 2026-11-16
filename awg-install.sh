@@ -69,14 +69,13 @@ make -C "$stage/amneziawg-tools/src" -j2
 install -d -m 700 "$base/bin" /etc/amnezia/amneziawg "$data"
 install -m 755 "$stage/amneziawg-go.bin" "$base/bin/amneziawg-go"
 install -m 755 "$stage/amneziawg-tools/src/wg" "$base/bin/awg"
-# Force the pinned Go engine; an older installed kernel module must not silently
-# consume a newer 3.1 configuration. Preserve upstream license/copyright headers.
+# Use native kernel module by default if available; otherwise fallback to amneziawg-go.
 python3 - "$stage/amneziawg-tools/src/wg-quick/linux.bash" <<'PY'
 import sys
 from pathlib import Path
 p=Path(sys.argv[1]); source=p.read_text()
 a=source.index('add_if() {'); b=source.index('\ndel_if() {',a)
-source=source[:a]+'add_if() {\n    cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}" "$INTERFACE"\n}\n'+source[b:]
+source=source[:a]+'add_if() {\n    local ret=0\n    cmd ip link add "$INTERFACE" type amneziawg 2>/dev/null || ret=$?\n    [[ $ret -eq 0 ]] || cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}" "$INTERFACE"\n}\n'+source[b:]
 p.write_text(source)
 PY
 install -m 755 "$stage/amneziawg-tools/src/wg-quick/linux.bash" "$base/bin/awg-quick"
