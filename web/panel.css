@@ -100,6 +100,8 @@ main,.surface,.notice{min-width:0;overflow-wrap:anywhere}
 
 /* Separate adjacent controls and preserve footer labels in the mobile drawer. */
 .warp-card{margin-top:24px}
+.warp-endpoint-panel{margin-top:16px;padding-top:16px;border-top:1px solid var(--line)}
+.warp-endpoint-buttons{display:flex;gap:8px;align-items:flex-end;margin-bottom:18px}
 #import-measured{margin-top:16px}
 .sidebar-bottom #theme{margin-top:10px}
 .sidebar-bottom #theme-label{display:inline}

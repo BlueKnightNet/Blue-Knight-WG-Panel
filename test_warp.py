@@ -2,6 +2,7 @@
 import io
 import json
 from pathlib import Path
+import time
 import unittest
 from unittest.mock import patch
 import urllib.request
@@ -192,6 +193,71 @@ class WarpTests(PanelTestBase):
         self.assertEqual(r.status, 200)
         self.assertTrue(panel.load()['warpOutbound'])
         self.assertTrue(any(c[:4] == ('ip', 'rule', 'add', 'from') and c[4] == '10.203.240.0/24' for c in self.commands))
+
+    def test_warp_endpoint_domain_and_ipv6_support(self):
+        self.assertEqual(panel.warp_endpoint('engage.cloudflareclient.com:2408'), 'engage.cloudflareclient.com:2408')
+        self.assertEqual(panel.warp_endpoint('engage.cloudflareclient.com:500'), 'engage.cloudflareclient.com:500')
+        self.assertEqual(panel.warp_endpoint('engage.cloudflareclient.com', [4500]), 'engage.cloudflareclient.com:4500')
+        self.assertEqual(panel.warp_endpoint('[2606:4700:d0::a29f:c001]:2408'), '[2606:4700:d0::a29f:c001]:2408')
+        with self.assertRaises(ValueError):
+            panel.warp_endpoint('invalid host!:2408')
+        with self.assertRaises(ValueError):
+            panel.warp_endpoint('162.159.192.1:999999')
+
+    def test_set_warp_endpoint_and_rotate_actions(self):
+        config = '[Interface]\nPrivateKey = priv\nTable = off\n[Peer]\nPublicKey = pubkey\nEndpoint = 162.159.192.1:2408\n'
+        panel.atomic(panel.WARP_CONFIG, config)
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({'endpoint': '162.159.192.1:2408', 'ipv4': '172.16.0.2/32'}))
+
+        with patch.object(panel, 'run', return_value='warp0'):
+            # Action: endpoint
+            r = self.request('/api/warp', {'action': 'endpoint', 'endpoint': '162.159.193.1:500'})
+            self.assertEqual(r.status, 200)
+            data = json.load(r)
+            self.assertEqual(data['endpoint'], '162.159.193.1:500')
+            self.assertIn('Endpoint = 162.159.193.1:500', panel.WARP_CONFIG.read_text())
+            account = json.loads((panel.ROOT / 'warp.json').read_text())
+            self.assertEqual(account['endpoint'], '162.159.193.1:500')
+
+            # Action: rotate
+            r = self.request('/api/warp', {'action': 'rotate'})
+            self.assertEqual(r.status, 200)
+            rotated = json.load(r)['endpoint']
+            self.assertNotEqual(rotated, '162.159.193.1:500')
+
+    def test_warp_status_health_and_diagnostics(self):
+        panel.atomic(panel.WARP_CONFIG, '[Interface]\nTable = off\n[Peer]\nPublicKey = pk\nEndpoint = 162.159.192.1:500\n')
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({'endpoint': '162.159.192.1:500', 'ipv4': '172.16.0.2/32'}))
+
+        # Simulation: active interface but 0 handshake
+        def mock_run_no_hs(*cmd, **kwargs):
+            if cmd == ('ip', 'link', 'show', 'warp0'):
+                return 'warp0: <POINTOPOINT,NOARP,UP,LOWER_UP>'
+            if cmd == ('wg', 'show', 'warp0', 'dump'):
+                return 'priv\tpub\t0\toff\npubkey\tpsk\t162.159.192.1:500\t0.0.0.0/0\t0\t0\t148\t25'
+            return ''
+
+        with patch.object(panel, 'run', side_effect=mock_run_no_hs):
+            status = panel.warp_status()
+            self.assertTrue(status['active'])
+            self.assertFalse(status['connected'])
+            self.assertEqual(status['handshake'], 0)
+
+        # Simulation: active interface with recent handshake and received traffic
+        now = int(time.time())
+        def mock_run_healthy(*cmd, **kwargs):
+            if cmd == ('ip', 'link', 'show', 'warp0'):
+                return 'warp0: <POINTOPOINT,NOARP,UP,LOWER_UP>'
+            if cmd == ('wg', 'show', 'warp0', 'dump'):
+                return f'priv\tpub\t0\toff\npubkey\tpsk\t162.159.192.1:500\t0.0.0.0/0\t{now - 10}\t5120\t2048\t25'
+            return ''
+
+        with patch.object(panel, 'run', side_effect=mock_run_healthy):
+            status = panel.warp_status()
+            self.assertTrue(status['active'])
+            self.assertTrue(status['connected'])
+            self.assertEqual(status['rx'], 5120)
+            self.assertEqual(status['tx'], 2048)
 
         # Update settings with warpOutbound = False
         self.commands.clear()
