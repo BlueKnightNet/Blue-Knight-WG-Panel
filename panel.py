@@ -16,6 +16,9 @@ import zipfile
 import subprocess
 import tempfile
 import time
+import datetime
+import urllib.request
+import urllib.error
 import traceback
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
@@ -30,6 +33,9 @@ AWG_BIN = '/opt/wg-auto/awg/bin/'
 AWG_HISTORY = []
 AWG_SAMPLES = {}
 AWG_KEYS = ('Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4')
+WARP_CONFIG = Path(os.environ.get('WG_AUTO_WARP_CONFIG', '/etc/wireguard/warp0.conf'))
+WARP_IFACE = 'warp0'
+WARP_REG_URL = 'https://api.cloudflareclient.com/v0a2158/reg'
 MUTATION_LOCK = threading.Lock()
 AUTH_LOCK = threading.Lock()
 AUTH_FAILURES = {}
@@ -362,6 +368,187 @@ def awg_install_status():
     return result
 
 
+def register_warp():
+    """Register a Cloudflare WARP client account and write warp0.conf with Table = off."""
+    priv = run('wg', 'genkey')
+    pub = run('wg', 'pubkey', data=priv + '\n')
+    now_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    payload = {
+        "key": pub,
+        "install_id": "",
+        "fcm_token": "",
+        "tos": now_utc,
+        "model": "PC",
+        "serial_number": "",
+        "locale": "en_US"
+    }
+    req = urllib.request.Request(
+        WARP_REG_URL,
+        data=json.dumps(payload).encode('utf-8'),
+        headers={
+            "User-Agent": "okhttp/3.12.1",
+            "CF-Client-Version": "a-6.3-2158",
+            "Content-Type": "application/json; charset=UTF-8"
+        },
+        method="POST"
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        data = json.loads(resp.read().decode('utf-8'))
+
+    peer = data['config']['peers'][0]
+    peer_pub = peer['public_key']
+    endpoint = peer['endpoint']['v4']
+    ipv4 = data['config']['interface']['addresses']['v4']
+    ipv6 = data['config']['interface']['addresses'].get('v6', '')
+
+    conf_lines = [
+        '[Interface]',
+        f'PrivateKey = {priv}',
+        f'Address = {ipv4}' + (f', {ipv6}' if ipv6 else ''),
+        'DNS = 1.1.1.1, 1.0.0.1',
+        'MTU = 1280',
+        'Table = off',
+        '',
+        '[Peer]',
+        f'PublicKey = {peer_pub}',
+        f'Endpoint = {endpoint}',
+        'AllowedIPs = 0.0.0.0/0, ::/0',
+        'PersistentKeepalive = 25',
+        ''
+    ]
+    conf_text = '\n'.join(conf_lines)
+    atomic(WARP_CONFIG, conf_text)
+    try:
+        os.chmod(WARP_CONFIG, 0o600)
+    except Exception:
+        pass
+
+    reg_info = {
+        'id': data.get('id'),
+        'token': data.get('token'),
+        'private': priv,
+        'public': pub,
+        'ipv4': ipv4,
+        'ipv6': ipv6,
+        'peerPublic': peer_pub,
+        'endpoint': endpoint,
+        'registeredAt': time.time()
+    }
+    atomic(ROOT / 'warp.json', json.dumps(reg_info, indent=2))
+    return reg_info
+
+
+def warp_status():
+    account_path = ROOT / 'warp.json'
+    account = json.loads(account_path.read_text()) if account_path.exists() else None
+    active = False
+    try:
+        active = 'warp0' in run('ip', 'link', 'show', 'warp0')
+    except Exception:
+        pass
+    return {
+        'registered': account is not None,
+        'installed': WARP_CONFIG.exists(),
+        'active': active,
+        'ipv4': (account or {}).get('ipv4', ''),
+        'endpoint': (account or {}).get('endpoint', ''),
+    }
+
+
+def ensure_warp_interface():
+    """Ensure warp0 interface is up if configured."""
+    if not WARP_CONFIG.exists():
+        register_warp()
+    status = warp_status()
+    if not status['active']:
+        try:
+            run('wg-quick', 'up', str(WARP_CONFIG))
+        except Exception:
+            pass
+
+
+def stop_warp_interface():
+    """Bring down warp0 interface and teardown routing."""
+    try:
+        run('wg-quick', 'down', str(WARP_CONFIG))
+    except Exception:
+        pass
+    try:
+        run('ip', 'route', 'flush', 'table', '100')
+    except Exception:
+        pass
+
+
+def sync_warp_routing(state):
+    """Sync policy routing and firewall rules for WARP outbound."""
+    warp_on = state.get('warpOutbound', False)
+    has_client_warp = any(c.get('tuning', {}).get('warp') == 'enabled' for c in state.get('clients', []))
+    if not warp_on and not has_client_warp and not WARP_CONFIG.exists():
+        return
+
+    network = state.get('network')
+    command, _, iface, _, _ = engine(state)
+
+    if not network:
+        return
+
+    if warp_on or has_client_warp:
+        try:
+            ensure_warp_interface()
+        except Exception:
+            pass
+        try:
+            run('ip', 'route', 'replace', 'default', 'dev', WARP_IFACE, 'table', '100')
+        except Exception:
+            pass
+        try:
+            try:
+                run('iptables', '-C', 'FORWARD', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
+            except Exception:
+                run('iptables', '-I', 'FORWARD', '1', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
+            try:
+                run('iptables', '-C', 'FORWARD', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
+            except Exception:
+                run('iptables', '-I', 'FORWARD', '1', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
+            try:
+                run('iptables', '-t', 'nat', '-C', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
+            except Exception:
+                run('iptables', '-t', 'nat', '-A', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
+            try:
+                run('iptables', '-t', 'mangle', '-C', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
+            except Exception:
+                run('iptables', '-t', 'mangle', '-A', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
+        except Exception:
+            pass
+
+    try:
+        rules = run('ip', 'rule', 'show')
+        has_subnet_rule = f'from {network} lookup 100' in rules or f'from {network} table 100' in rules
+        if warp_on and not has_subnet_rule:
+            run('ip', 'rule', 'add', 'from', network, 'table', '100', 'priority', '15000')
+        elif not warp_on and has_subnet_rule:
+            run('ip', 'rule', 'del', 'from', network, 'table', '100', 'priority', '15000')
+    except Exception:
+        pass
+
+    for c in state.get('clients', []):
+        ip = c.get('address')
+        if not ip:
+            continue
+        warp_pref = c.get('tuning', {}).get('warp', 'default')
+        rule_target = f'from {ip} lookup 100'
+        rule_target_alt = f'from {ip} table 100'
+        try:
+            rules = run('ip', 'rule', 'show')
+            has_client_rule = rule_target in rules or rule_target_alt in rules
+            if warp_pref == 'enabled' and not has_client_rule:
+                run('ip', 'rule', 'add', 'from', ip, 'table', '100', 'priority', '14500')
+            elif (warp_pref != 'enabled' or not warp_on) and has_client_rule:
+                run('ip', 'rule', 'del', 'from', ip, 'table', '100', 'priority', '14500')
+        except Exception:
+            pass
+
+
 
 def initialize():
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -490,6 +677,7 @@ def save(state):
         sync(text, state)
         atomic(config, text)
         atomic(path, json.dumps(state))
+        sync_warp_routing(state)
     except Exception:
         atomic(config, old)
         atomic(path, old_state)
@@ -527,7 +715,8 @@ def effective_tuning(state, c):
     if profile not in {'default', 'custom', *PROFILES, *state.get('connectionPresets', {})}:
         profile = 'custom'
     return dict(profile=profile, mtu=tuning.get('mtu', state['mtu']),
-                keepalive=tuning.get('keepalive', 25), dns=tuning.get('dns') or state['dns'])
+                keepalive=tuning.get('keepalive', 25), dns=tuning.get('dns') or state['dns'],
+                warp=tuning.get('warp', 'default'))
 
 
 def normalize_dns(value, required=False):
@@ -541,11 +730,14 @@ def normalize_dns(value, required=False):
 
 
 def set_tuning(client, body, state=None):
+    warp = body.get('warp', 'default')
+    if warp not in ('default', 'enabled', 'disabled'):
+        warp = 'default'
     profile = body.get('profile', 'default')
     if profile == 'default':
         dns = normalize_dns(body.get('dns', ''))
-        if dns:
-            client['tuning'] = dict(profile='default', dns=dns)
+        if dns or warp != 'default':
+            client['tuning'] = dict(profile='default', dns=dns, warp=warp)
         else:
             client.pop('tuning', None)
         return
@@ -559,7 +751,7 @@ def set_tuning(client, body, state=None):
     if not 576 <= mtu <= 1420 or not 0 <= keepalive <= 120:
         raise ValueError('MTU must be 1280–1420; keepalive must be 0–120 seconds.')
     dns = normalize_dns(body.get('dns', ''))
-    client['tuning'] = dict(profile=profile, mtu=mtu, keepalive=keepalive, dns=dns)
+    client['tuning'] = dict(profile=profile, mtu=mtu, keepalive=keepalive, dns=dns, warp=warp)
 
 
 def manage_preset(state, body):
@@ -791,6 +983,8 @@ def settings(state, body):
     if not 1 <= len(dns) <= 3:
         raise ValueError('Provide one to three DNS IP addresses.')
     state.update(host=host, port=port, mtu=mtu, dns=', '.join(dns))
+    if 'warpOutbound' in body:
+        state['warpOutbound'] = str(body['warpOutbound']).lower() in ('1', 'true', 'yes', 'on')
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -868,6 +1062,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, json.loads(path.read_text()) if path.exists() else [])
             if self.path == '/api/diagnostics':
                 return self.send(200, diagnostics(state))
+            if self.path == '/api/warp':
+                return self.send(200, {**warp_status(), 'workspaceWarp': state.get('warpOutbound', False)})
             if self.path == '/api/status':
                 peers, error = {}, None
                 try:
@@ -884,6 +1080,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, dict(protocol=state.get('protocol', 'wireguard'), interface=engine(state)[2],
                     obfuscation={k: v for k, v in fields(state['header']).items() if k in AWG_KEYS},
                     host=state['host'], port=state['port'], dns=state['dns'], mtu=state['mtu'],
+                    warpOutbound=state.get('warpOutbound', False),
+                    warp={**warp_status(), 'workspaceWarp': state.get('warpOutbound', False)},
                     profiles={**PROFILES, **state.get('connectionPresets', {})},
                     connectionPresets=state.get('connectionPresets', {}),
                     dnsPresets={**DNS_PRESETS, **state.get('dnsPresets', {})}, savedDnsPresets=state.get('dnsPresets', {}),
@@ -995,7 +1193,7 @@ class Handler(BaseHTTPRequestHandler):
                 if 'name' in body:
                     name = str(body['name']).strip()
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', name):
-                        raise ValueError('Use 1ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“40 letters, numbers, underscores or hyphens.')
+                        raise ValueError('Use 1–40 letters, numbers, underscores or hyphens.')
                     if any(c['id'] != client['id'] and c['name'] == name for c in state['clients']):
                         raise ValueError('Client name already exists.')
                     client['name'] = name
@@ -1027,18 +1225,54 @@ class Handler(BaseHTTPRequestHandler):
                     raise ValueError('Client not found.')
                 set_tuning(client, body, state)
                 atomic(state_path(state), json.dumps(state))
+                sync_warp_routing(state)
                 audit('Updated network settings for ' + client['name'])
             elif self.path == '/api/presets':
                 manage_preset(state, body)
                 atomic(state_path(state), json.dumps(state))
             elif self.path == '/api/settings':
                 settings(state, body)
-                # Endpoint/DNS/MTU changes affect exported configs, not the server listener.
                 atomic(state_path(state), json.dumps(state))
+                sync_warp_routing(state)
+                audit('Updated network settings')
+            elif self.path == '/api/warp':
+                action = body.get('action')
+                if action == 'setup':
+                    ensure_warp_interface()
+                    audit('Configured Cloudflare WARP interface')
+                elif action == 'enable':
+                    state['warpOutbound'] = True
+                    atomic(state_path(state), json.dumps(state))
+                    sync_warp_routing(state)
+                    audit('Enabled Cloudflare WARP outbound for ' + protocol)
+                elif action == 'disable':
+                    state['warpOutbound'] = False
+                    atomic(state_path(state), json.dumps(state))
+                    sync_warp_routing(state)
+                    audit('Disabled Cloudflare WARP outbound for ' + protocol)
+                elif action == 'toggle':
+                    state['warpOutbound'] = not state.get('warpOutbound', False)
+                    atomic(state_path(state), json.dumps(state))
+                    sync_warp_routing(state)
+                    audit(('Enabled' if state['warpOutbound'] else 'Disabled') + ' Cloudflare WARP outbound for ' + protocol)
+                elif action == 'reset':
+                    stop_warp_interface()
+                    try:
+                        (ROOT / 'warp.json').unlink(missing_ok=True)
+                        WARP_CONFIG.unlink(missing_ok=True)
+                    except Exception:
+                        pass
+                    state['warpOutbound'] = False
+                    atomic(state_path(state), json.dumps(state))
+                    sync_warp_routing(state)
+                    audit('Reset Cloudflare WARP interface')
+                else:
+                    raise ValueError('Unknown WARP action.')
+                return self.send(200, {**warp_status(), 'workspaceWarp': state.get('warpOutbound', False)})
             elif self.path == '/api/clients':
                 name = str(body.get('name', '')).strip()
                 if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', name):
-                    raise ValueError('Use 1ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“40 letters, numbers, underscores or hyphens.')
+                    raise ValueError('Use 1–40 letters, numbers, underscores or hyphens.')
                 if any(c['name'] == name for c in state['clients']):
                     raise ValueError('Client name already exists.')
                 used = {c['address'] for c in state['clients']}
