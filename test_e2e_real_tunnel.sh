@@ -143,15 +143,25 @@ fi
 echo "Phase 1 PASS: Real WireGuard tunnel verified successfully."
 
 echo "=== Phase 2: Real AmneziaWG obfuscated tunnel test ==="
-ip netns exec "$srv_ns" "$bin/amneziawg-go" -f awg0 >"$stage/awg_srv.log" 2>&1 & srv_awg_pid=$!
-ip netns exec "$cli_ns" "$bin/amneziawg-go" -f awg-cli >"$stage/awg_cli.log" 2>&1 & cli_awg_pid=$!
+# Check if native kernel module is available; prioritize it, otherwise fallback to amneziawg-go
+has_kernel_awg=0
+modprobe amneziawg 2>/dev/null || true
+if ip -n "$srv_ns" link add awg0 type amneziawg 2>/dev/null; then
+  has_kernel_awg=1
+  ip -n "$cli_ns" link add awg-cli type amneziawg
+  echo "Phase 2: Native AmneziaWG kernel module detected and prioritized."
+else
+  echo "Phase 2: Native kernel module unavailable; testing automatic amneziawg-go userspace fallback."
+  ip netns exec "$srv_ns" "$bin/amneziawg-go" -f awg0 >"$stage/awg_srv.log" 2>&1 & srv_awg_pid=$!
+  ip netns exec "$cli_ns" "$bin/amneziawg-go" -f awg-cli >"$stage/awg_cli.log" 2>&1 & cli_awg_pid=$!
 
-for _ in $(seq 1 50); do
-  if ip -n "$srv_ns" link show awg0 >/dev/null 2>&1 && ip -n "$cli_ns" link show awg-cli >/dev/null 2>&1; then
-    break
-  fi
-  sleep 0.1
-done
+  for _ in $(seq 1 50); do
+    if ip -n "$srv_ns" link show awg0 >/dev/null 2>&1 && ip -n "$cli_ns" link show awg-cli >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.1
+  done
+fi
 
 srv_awg_priv=$("$bin/awg" genkey)
 srv_awg_pub=$(printf '%s' "$srv_awg_priv" | "$bin/awg" pubkey)
@@ -215,7 +225,11 @@ latest_awg_hs=$(ip netns exec "$srv_ns" "$bin/awg" show awg0 latest-handshakes |
 if [[ -n "$latest_awg_hs" && "$latest_awg_hs" -gt 0 ]]; then
   echo "Phase 2: AmneziaWG handshake confirmed (timestamp: $latest_awg_hs)."
 fi
-echo "Phase 2 PASS: Real AmneziaWG obfuscated tunnel verified successfully."
+if [[ $has_kernel_awg -eq 1 ]]; then
+  echo "Phase 2 PASS: Real AmneziaWG tunnel verified using native Linux kernel module."
+else
+  echo "Phase 2 PASS: Real AmneziaWG tunnel verified using amneziawg-go userspace fallback."
+fi
 
 echo "=== Phase 3: Cloudflare WARP outbound routing test ==="
 cat > "$stage/warp_reg.py" << 'PY'
