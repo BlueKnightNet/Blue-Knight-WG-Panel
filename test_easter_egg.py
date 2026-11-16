@@ -39,24 +39,9 @@ class EasterEggTests(PanelTestBase):
     def test_easter_egg_endpoint_not_found(self):
         """Test that /api/easter-egg/meow returns 404 when the audio file is missing."""
         missing_path = Path(self.temp.name) / 'nonexistent.mp3'
-        with patch.object(panel, 'EASTER_EGG_ASSET', missing_path), \
-             patch.object(panel, 'EASTER_EGG_FALLBACK', missing_path):
+        with patch.object(panel, 'EASTER_EGG_ASSET', missing_path):
             response = self.request('/api/easter-egg/meow')
             self.assertEqual(response.status, 404)
-
-    def test_easter_egg_fallback_path(self):
-        """Test that /api/easter-egg/meow falls back to /home/redsnow/meow/meow.mp3 if asset is missing."""
-        missing_asset = Path(self.temp.name) / 'missing_asset.mp3'
-        fallback_file = Path('/home/redsnow/meow/meow.mp3')
-        if not fallback_file.is_file():
-            self.skipTest("Fallback file /home/redsnow/meow/meow.mp3 not found on host")
-
-        with patch.object(panel, 'EASTER_EGG_ASSET', missing_asset), \
-             patch.object(panel, 'EASTER_EGG_FALLBACK', fallback_file):
-            response = self.request('/api/easter-egg/meow')
-            self.assertEqual(response.status, 200)
-            self.assertEqual(response.headers.get('Content-Type'), 'audio/mpeg')
-            self.assertEqual(len(response.read()), fallback_file.stat().st_size)
 
     def test_verify_timestamp_logic_matches_exactly_24_times(self):
         """Test helper function verify_timestamp_logic() checking that exactly 24 timestamps in a day satisfy hours == minutes."""
