@@ -97,3 +97,15 @@ main{margin-left:246px;padding:30px 36px 0;max-width:1900px}.topbar{margin-botto
 main,.surface,.notice{min-width:0;overflow-wrap:anywhere}
 
 :root[data-theme=gothic] .hero{background-position:center top}
+
+/* Separate adjacent controls and preserve footer labels in the mobile drawer. */
+.warp-card{margin-top:24px}
+#import-measured{margin-top:16px}
+.sidebar-bottom #theme{margin-top:10px}
+.sidebar-bottom #theme-label{display:inline}
+.channel-links a{display:inline-flex;align-items:center;gap:6px;min-height:44px}
+.social-icon{width:18px;height:18px;fill:currentColor;flex-shrink:0}
+@media(max-width:900px){
+ :root[data-theme] .hero{background-position:right top}
+ .sidebar-bottom #theme-label{display:inline}
+}

@@ -89,7 +89,11 @@ function snapshot(isAwg=false){const engineClients=isAwg?awgClients:clients;retu
     for(const view of ['overview','devices','network','presets','tools','activity','updates']){
      await navigate(view);
      assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),view+' overflows at '+width+' / '+theme);
+     if(view==='network')assert.ok(await page.evaluate(()=>{const save=document.querySelector('#settings button').getBoundingClientRect(),warp=document.querySelector('.warp-card').getBoundingClientRect();return warp.top-save.bottom>=24}),'WARP card needs space above it');
+     if(view==='tools')assert.ok(await page.evaluate(()=>{const file=document.querySelector('#measured-file').getBoundingClientRect(),button=document.querySelector('#import-measured').getBoundingClientRect();return button.top-file.bottom>=16}),'Preset import needs space above it');
+     if(view==='overview'&&width<=900)assert.equal(await page.locator('.hero').evaluate(n=>getComputedStyle(n).backgroundPositionX.split(',').pop().trim()),'100%');
     }
+    if(width<=900){await page.locator('#menu-toggle').click();await page.locator('#theme').scrollIntoViewIfNeeded();assert.ok(await page.locator('#theme-label').isVisible());assert.ok(await page.evaluate(()=>{const update=document.querySelector('.sidebar-bottom [data-view=updates]').getBoundingClientRect(),theme=document.querySelector('#theme').getBoundingClientRect();return theme.top-update.bottom>=10}));assert.equal(await page.locator('.channel-links .social-icon').count(),2);await page.keyboard.press('Escape');}
    }
   }
   await page.setViewportSize({width:1440,height:1100});await page.evaluate(()=>setTheme('dawn'));await navigate('overview');await page.screenshot({path:path.join(require('node:os').tmpdir(),'diana-light-fixture.png'),fullPage:true});
