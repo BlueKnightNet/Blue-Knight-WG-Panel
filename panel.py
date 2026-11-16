@@ -36,6 +36,18 @@ AWG_KEYS = ('Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4')
 WARP_CONFIG = Path(os.environ.get('WG_AUTO_WARP_CONFIG', '/etc/wireguard/warp0.conf'))
 WARP_IFACE = 'warp0'
 WARP_REG_URL = 'https://api.cloudflareclient.com/v0a2158/reg'
+
+
+def warp_conf_path():
+    if 'WG_AUTO_WARP_CONFIG' in os.environ:
+        return Path(os.environ['WG_AUTO_WARP_CONFIG'])
+    if 'WG_AUTO_DATA' in os.environ or str(ROOT) != '/etc/wireguard/wg-auto-panel':
+        return ROOT / 'warp0.conf'
+    return WARP_CONFIG
+
+
+def warp_available():
+    return (ROOT / 'warp.json').exists() or warp_conf_path().exists()
 MUTATION_LOCK = threading.Lock()
 AUTH_LOCK = threading.Lock()
 AUTH_FAILURES = {}
@@ -482,7 +494,7 @@ def stop_warp_interface():
 def sync_warp_routing(state):
     """Sync policy routing and firewall rules for WARP outbound."""
     warp_on = state.get('warpOutbound', False)
-    has_client_warp = any(c.get('tuning', {}).get('warp') == 'enabled' for c in state.get('clients', []))
+    has_client_warp = any((c.get('warp') == 'enabled' or c.get('tuning', {}).get('warp') == 'enabled') for c in state.get('clients', []))
     if not warp_on and not has_client_warp and not WARP_CONFIG.exists():
         return
 
@@ -501,32 +513,33 @@ def sync_warp_routing(state):
             run('ip', 'route', 'replace', 'default', 'dev', WARP_IFACE, 'table', '100')
         except Exception:
             pass
-        try:
+        if warp_on:
             try:
-                run('iptables', '-C', 'FORWARD', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
+                try:
+                    run('iptables', '-C', 'FORWARD', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
+                except Exception:
+                    run('iptables', '-I', 'FORWARD', '1', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
+                try:
+                    run('iptables', '-C', 'FORWARD', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
+                except Exception:
+                    run('iptables', '-I', 'FORWARD', '1', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
+                try:
+                    run('iptables', '-t', 'nat', '-C', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
+                except Exception:
+                    run('iptables', '-t', 'nat', '-A', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
+                try:
+                    run('iptables', '-t', 'mangle', '-C', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
+                except Exception:
+                    run('iptables', '-t', 'mangle', '-A', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
             except Exception:
-                run('iptables', '-I', 'FORWARD', '1', '-i', iface, '-o', WARP_IFACE, '-j', 'ACCEPT')
-            try:
-                run('iptables', '-C', 'FORWARD', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
-            except Exception:
-                run('iptables', '-I', 'FORWARD', '1', '-i', WARP_IFACE, '-o', iface, '-m', 'conntrack', '--ctstate', 'RELATED,ESTABLISHED', '-j', 'ACCEPT')
-            try:
-                run('iptables', '-t', 'nat', '-C', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
-            except Exception:
-                run('iptables', '-t', 'nat', '-A', 'POSTROUTING', '-o', WARP_IFACE, '-j', 'MASQUERADE')
-            try:
-                run('iptables', '-t', 'mangle', '-C', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
-            except Exception:
-                run('iptables', '-t', 'mangle', '-A', 'FORWARD', '-o', WARP_IFACE, '-p', 'tcp', '--tcp-flags', 'SYN,RST', 'SYN', '-j', 'TCPMSS', '--clamp-mss-to-pmtu')
-        except Exception:
-            pass
+                pass
 
     try:
         rules = run('ip', 'rule', 'show')
         has_subnet_rule = f'from {network} lookup 100' in rules or f'from {network} table 100' in rules
         if warp_on and not has_subnet_rule:
             run('ip', 'rule', 'add', 'from', network, 'table', '100', 'priority', '15000')
-        elif not warp_on and has_subnet_rule:
+        elif not warp_on and (has_subnet_rule or '100' not in rules):
             run('ip', 'rule', 'del', 'from', network, 'table', '100', 'priority', '15000')
     except Exception:
         pass
@@ -535,16 +548,20 @@ def sync_warp_routing(state):
         ip = c.get('address')
         if not ip:
             continue
-        warp_pref = c.get('tuning', {}).get('warp', 'default')
-        rule_target = f'from {ip} lookup 100'
-        rule_target_alt = f'from {ip} table 100'
+        client_ip = f"{ip}/32" if '/' not in ip else ip
+        warp_pref = c.get('warp') or c.get('tuning', {}).get('warp', 'default')
+        rule_target = f'from {client_ip} lookup 100'
+        rule_target_alt = f'from {client_ip} table 100'
         try:
             rules = run('ip', 'rule', 'show')
-            has_client_rule = rule_target in rules or rule_target_alt in rules
+            has_client_rule = (rule_target in rules or rule_target_alt in rules
+                               or f'from {ip} lookup 100' in rules or f'from {ip} table 100' in rules)
             if warp_pref == 'enabled' and not has_client_rule:
-                run('ip', 'rule', 'add', 'from', ip, 'table', '100', 'priority', '14500')
+                run('ip', 'rule', 'add', 'from', client_ip, 'table', '100', 'priority', '14500')
+            elif warp_pref == 'disabled' and (has_client_rule or '100' not in rules):
+                run('ip', 'rule', 'del', 'from', client_ip, 'table', '100', 'priority', '14500')
             elif (warp_pref != 'enabled' or not warp_on) and has_client_rule:
-                run('ip', 'rule', 'del', 'from', ip, 'table', '100', 'priority', '14500')
+                run('ip', 'rule', 'del', 'from', client_ip, 'table', '100', 'priority', '14500')
         except Exception:
             pass
 
@@ -730,9 +747,12 @@ def normalize_dns(value, required=False):
 
 
 def set_tuning(client, body, state=None):
-    warp = body.get('warp', 'default')
-    if warp not in ('default', 'enabled', 'disabled'):
-        warp = 'default'
+    if 'warp' in body:
+        warp = body['warp']
+        if warp not in ('default', 'enabled', 'disabled'):
+            raise ValueError("warp must be 'default', 'enabled', or 'disabled'.")
+        client['warp'] = warp
+    warp = client.get('warp', body.get('warp', 'default'))
     profile = body.get('profile', 'default')
     if profile == 'default':
         dns = normalize_dns(body.get('dns', ''))
