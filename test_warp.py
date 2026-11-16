@@ -11,6 +11,24 @@ from test_base import PanelTestBase
 
 
 class WarpTests(PanelTestBase):
+    def test_placeholder_endpoint_port_uses_advertised_or_default_port(self):
+        self.assertEqual(panel.warp_endpoint('162.159.192.7:0', [500, 2408]), '162.159.192.7:500')
+        self.assertEqual(panel.warp_endpoint('162.159.192.7:0'), '162.159.192.7:2408')
+        self.assertEqual(panel.warp_endpoint('162.159.192.7:4500'), '162.159.192.7:4500')
+        self.assertEqual(panel.warp_endpoint('162.159.192.7'), '162.159.192.7:2408')
+
+    def test_existing_zero_port_profile_is_repaired_without_changing_keys(self):
+        config = '[Interface]\nPrivateKey = private\nTable = off\n[Peer]\nPublicKey = public\nEndpoint = 162.159.192.7:0\n'
+        panel.atomic(panel.WARP_CONFIG, config)
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({'endpoint': '162.159.192.7:0', 'token': 'keep-token'}))
+        with patch.object(panel, 'warp_status', return_value={'active': True}), patch.object(panel, 'run') as run:
+            panel.ensure_warp_interface()
+            run.assert_called_once_with('wg', 'set', 'warp0', 'peer', 'public', 'endpoint', '162.159.192.7:2408')
+        self.assertEqual(panel.WARP_CONFIG.read_text(), config.replace(':0', ':2408'))
+        account = json.loads((panel.ROOT / 'warp.json').read_text())
+        self.assertEqual(account['endpoint'], '162.159.192.7:2408')
+        self.assertEqual(account['token'], 'keep-token')
+
     def test_warp_registration_and_config(self):
         mock_response = io.BytesIO(json.dumps({
             'id': 'test-warp-id',
@@ -18,7 +36,7 @@ class WarpTests(PanelTestBase):
             'config': {
                 'peers': [{
                     'public_key': 'bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=',
-                    'endpoint': {'v4': '162.159.192.1:2408'}
+                    'endpoint': {'v4': '162.159.192.1:0', 'ports': [2408, 500]}
                 }],
                 'interface': {
                     'addresses': {'v4': '172.16.0.2/32', 'v6': '2606:4700:110:8::2/128'}
@@ -31,6 +49,8 @@ class WarpTests(PanelTestBase):
         self.assertTrue(panel.WARP_CONFIG.exists())
         conf_text = panel.WARP_CONFIG.read_text()
         self.assertIn('Table = off', conf_text)
+        self.assertIn('Endpoint = 162.159.192.1:2408', conf_text)
+        self.assertEqual(reg['endpoint'], '162.159.192.1:2408')
         self.assertIn('Address = 172.16.0.2/32', conf_text)
         self.assertIn('PublicKey = bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=', conf_text)
         self.assertTrue((panel.ROOT / 'warp.json').exists())

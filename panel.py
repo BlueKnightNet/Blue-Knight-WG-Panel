@@ -381,6 +381,20 @@ def awg_install_status():
     return result
 
 
+def warp_endpoint(endpoint, ports=()):
+    """The registration API can return an IPv4 endpoint with placeholder port 0."""
+    host, separator, port = str(endpoint).rpartition(':')
+    if not separator:
+        host, port = str(endpoint), '0'
+    host = str(ipaddress.IPv4Address(host))
+    port = int(port)
+    if port == 0:
+        port = next((p for p in ports if isinstance(p, int) and not isinstance(p, bool) and 1 <= p <= 65535), 2408)
+    if not 1 <= port <= 65535:
+        raise ValueError('Invalid WARP endpoint port.')
+    return f'{host}:{port}'
+
+
 def register_warp():
     """Register a Cloudflare WARP client account and write warp0.conf with Table = off."""
     priv = run('wg', 'genkey')
@@ -410,7 +424,7 @@ def register_warp():
 
     peer = data['config']['peers'][0]
     peer_pub = peer['public_key']
-    endpoint = peer['endpoint']['v4']
+    endpoint = warp_endpoint(peer['endpoint']['v4'], peer['endpoint'].get('ports', []))
     ipv4 = data['config']['interface']['addresses']['v4']
     ipv6 = data['config']['interface']['addresses'].get('v6', '')
 
@@ -472,7 +486,26 @@ def ensure_warp_interface():
     """Ensure warp0 interface is up if configured."""
     if not WARP_CONFIG.exists():
         register_warp()
+    # Repair profiles produced by older versions without rotating account keys.
+    config = WARP_CONFIG.read_text()
+    endpoint_match = re.search(r'^Endpoint\s*=\s*(\S+)\s*$', config, re.MULTILINE)
+    repaired_endpoint = None
+    if endpoint_match:
+        endpoint = warp_endpoint(endpoint_match[1])
+        if endpoint != endpoint_match[1]:
+            repaired_endpoint = endpoint
+            config = config[:endpoint_match.start(1)] + endpoint + config[endpoint_match.end(1):]
+            atomic(WARP_CONFIG, config)
+            account_path = ROOT / 'warp.json'
+            if account_path.exists():
+                account = json.loads(account_path.read_text())
+                account['endpoint'] = endpoint
+                atomic(account_path, json.dumps(account, indent=2))
     status = warp_status()
+    if status['active'] and repaired_endpoint:
+        peer = re.search(r'^PublicKey\s*=\s*(\S+)\s*$', config, re.MULTILINE)
+        if peer:
+            run('wg', 'set', WARP_IFACE, 'peer', peer[1], 'endpoint', repaired_endpoint)
     if not status['active']:
         try:
             run('wg-quick', 'up', str(WARP_CONFIG))
