@@ -1,69 +1,125 @@
 # Blue Knight WG Panel
 
-A web panel for WireGuard and AmneziaWG on your own VPS.
+[![GitHub release](https://img.shields.io/github/v/release/BlueKnightNet/Blue-Knight-WG-Panel?include_prereleases&style=flat-square&color=blue)](https://github.com/BlueKnightNet/Blue-Knight-WG-Panel/releases)
+[![Docker Image](https://img.shields.io/badge/docker-ghcr.io-blue?logo=docker&style=flat-square)](https://github.com/BlueKnightNet/Blue-Knight-WG-Panel/pkgs/container/blue-knight-wg-panel)
+[![Multi-Arch](https://img.shields.io/badge/arch-amd64%20%7C%20arm64-success?style=flat-square)](https://github.com/BlueKnightNet/Blue-Knight-WG-Panel/pkgs/container/blue-knight-wg-panel)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
 
-- Create, pause, rename and revoke devices.
-- Download configs, QR codes, or a ZIP with every DNS preset.
-- View recent connections and traffic usage.
-- Customize DNS, connection profiles and themes.
+A self-hosted management panel for WireGuard and censorship-resistant AmneziaWG with automated Cloudflare WARP outbound routing. Designed for production VPS deployments, supporting native Linux kernel modules with automatic userspace failover.
 
-## Install step by step
+![Blue Knight WG Panel Hero](assets/screenshots/dashboard-dark.png)
 
-### 1. Prepare your VPS
+---
 
-Use **Ubuntu or Debian with systemd**, root/sudo access and a public IPv4 address. Restricted bot hosting containers are unsupported.
+## Key Features
 
-Connect to the server:
+- 🚀 Native WireGuard & AmneziaWG Inbound
+- 🛡️ Standard AmneziaWG Obfuscation (Jc, Jmin, Jmax, S1, S2, H1–H4)
+- 🌐 1-Click Cloudflare WARP Outbound Routing (`warp0`)
+- 📦 Multi-Architecture Docker support (`linux/amd64` & `linux/arm64` on GHCR)
+- 📱 1-Click QR Code & All-DNS ZIP Exports
+- ⏳ Per-Device Data Quotas & Automated Expiry
+- 🎨 Visual Themes (Moonlit Dark, Parchment Dawn, Gothic, etc.)
+
+---
+
+## Interface Overview
+
+| Dashboard (Dark Theme) | Cloudflare WARP & Network Settings |
+|:---:|:---:|
+| ![Dashboard Dark](assets/screenshots/dashboard-dark.png) | ![WARP Settings](assets/screenshots/network-warp-settings.png) |
+
+| Gothic Theme Preview |
+|:---:|
+| ![Dashboard Gothic](assets/screenshots/dashboard-gothic.png) |
+
+---
+
+## Quick Start (VPS Installer)
+
+### System Requirements
+- Ubuntu 20.04 / 22.04 / 24.04 or Debian 11 / 12
+- Systemd init system with root or `sudo` privileges
+- Public IPv4 address
+
+### One-Line Installation
+
+Run the following command on your VPS:
 
 ```bash
-ssh root@YOUR_VPS_IP
+curl -fsSL https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/install.sh -o /tmp/wg-auto-install.sh && sudo bash /tmp/wg-auto-install.sh
 ```
 
-### 2. Install the panel
+During installation, the script will detect your public IP, configure WireGuard, set up the panel service, and optionally prompt to install the native AmneziaWG kernel module.
+
+### Firewall Configuration
+
+Ensure the following ports are open in your VPS provider's security group / firewall:
+
+| Port | Protocol | Purpose |
+|:---|:---|:---|
+| `8787` | TCP | Panel HTTPS Web Interface |
+| `51820` | UDP | WireGuard VPN Endpoint (`wgauto0`) |
+| `51821` | UDP | AmneziaWG VPN Endpoint (`awg0`) |
+
+### Accessing the Web Panel
+
+1. Open `https://YOUR_VPS_IP:8787` in your browser.
+2. Accept the self-signed TLS certificate warning.
+3. Sign in with username: **`admin`**.
+4. Retrieve the auto-generated initial password on the server:
+   ```bash
+   sudo cat /etc/wireguard/wg-auto-panel/password
+   ```
+5. Update your administrative password under **Settings**.
+
+---
+
+## Native AmneziaWG Kernel Module
+
+Blue Knight WG Panel implements a hybrid driver model:
+1. **Kernel Module Priority**: If the host kernel has the `amneziawg` module installed, the panel operates directly through kernel space for maximum line-rate throughput and minimal CPU overhead.
+2. **Userspace Engine Fallback**: If the host kernel module is absent, the panel transparently engages the embedded `amneziawg-go` userspace daemon without disrupting operations.
+
+To achieve optimal performance, install the official [amnezia-vpn/amneziawg-linux-kernel-module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module) DKMS driver:
+
+### Ubuntu (20.04, 22.04, 24.04)
 
 ```bash
-sudo apt-get update && sudo apt-get install -y curl ca-certificates
-curl -fsSL https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/install.sh -o /tmp/wg-auto-install.sh
-sudo bash /tmp/wg-auto-install.sh
+sudo apt-get update
+sudo apt-get install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)"
+sudo add-apt-repository -y ppa:amnezia/ppa
+sudo apt-get update
+sudo apt-get install -y amneziawg amneziawg-dkms
+sudo modprobe amneziawg
 ```
 
-### 3. Open the ports
-
-In your VPS provider's firewall, allow **51820/UDP** for WireGuard and **8787/TCP** for the panel. Keep your SSH port open.
-
-### 4. Sign in
-
-Open `https://YOUR_VPS_IP:8787`. The panel uses a self-signed certificate, so your browser will show a certificate warning.
-
-Username: **admin**. Display your generated password on the VPS:
+### Debian (11, 12)
 
 ```bash
-sudo cat /etc/wireguard/wg-auto-panel/password
+sudo apt-get update
+sudo apt-get install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)"
+sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 57290828
+echo "deb https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main" | sudo tee /etc/apt/sources.list.d/amnezia.list
+echo "deb-src https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main" | sudo tee -a /etc/apt/sources.list.d/amnezia.list
+sudo apt-get update
+sudo apt-get install -y amneziawg amneziawg-dkms
+sudo modprobe amneziawg
 ```
 
-You can change it in **Settings**.
+Verify that the kernel module is active:
 
-### 5. Connect a device
+```bash
+lsmod | grep amneziawg
+```
 
-1. Create a device in the panel.
-2. Download its `.conf` or scan its QR code in the WireGuard app.
-3. Activate the tunnel and test internet access.
-4. Use **All DNS configs ZIP** to download DNS variants. Their filenames include the DNS preset name; activate only one variant at a time.
-
-Create a separate device for each phone or computer. Recent handshakes show active configs; they cannot count people sharing one key. Traffic counters can reset when the VPN restarts.
-
-## Optional: AmneziaWG
-
-1. Select **AmneziaWG** in the sidebar.
-2. Click **Install AmneziaWG** and wait for the build to finish.
-3. Open its displayed UDP port in your provider firewall.
-4. Create a device and import its config into an **AmneziaWG compatible app**.
-
-AmneziaWG uses separate keys and settings. Its configs require a compatible client.
+---
 
 ## Docker Deployment (GHCR)
 
-Multi-architecture Docker images (`linux/amd64` and `linux/arm64`) are published automatically on merge:
+Multi-architecture container images (`linux/amd64` and `linux/arm64`) are continuously built and published to GitHub Container Registry.
+
+### Standalone Docker Run
 
 ```bash
 docker run -d \
@@ -81,55 +137,106 @@ docker run -d \
   ghcr.io/blueknightnet/blue-knight-wg-panel:latest
 ```
 
-### AmneziaWG Kernel Module vs Userspace Fallback
-By default, the panel and container prioritize the host system's native **`amneziawg` kernel module** if available (recommended for maximum throughput and low CPU usage). If the host kernel module is not present, it automatically and seamlessly falls back to the built-in **`amneziawg-go`** userspace engine.
+### Docker Compose
 
-To install the native kernel module on your host VPS, follow the official instructions at [amnezia-vpn/amneziawg-linux-kernel-module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module):
-- **Ubuntu**:
-  ```bash
-  sudo add-apt-repository -y ppa:amnezia/ppa
-  sudo apt-get update
-  sudo apt-get install -y amneziawg amneziawg-dkms
-  ```
-- **Debian**: Follow the Launchpad repository setup in the [kernel module repository](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module#debian).
-- When using `install.sh`, the installer will also interactively offer to install the kernel module for you.
+```yaml
+services:
+  blue-knight-panel:
+    image: ghcr.io/blueknightnet/blue-knight-wg-panel:latest
+    container_name: blue-knight-panel
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    volumes:
+      - /etc/wireguard:/etc/wireguard
+      - /etc/amnezia/amneziawg:/etc/amnezia/amneziawg
+      - /opt/wg-auto:/opt/wg-auto
+    ports:
+      - "8787:8787/tcp"
+      - "51820:51820/udp"
+      - "51821:51821/udp"
+```
 
-## Update
+*Note: For the container to utilize native kernel acceleration, install the DKMS module on the host server prior to starting the container.*
 
-For an existing installation, switch its updater to this repository once:
+---
+
+## Cloudflare WARP Outbound Routing
+
+Blue Knight WG Panel supports dual-hop egress routing via Cloudflare WARP (`warp0`). When enabled:
+- Clients connect to your VPS over WireGuard or obfuscated AmneziaWG.
+- The VPS proxies egress traffic through Cloudflare's global edge network via an automated `warp0` WireGuard tunnel.
+- Destination websites observe Cloudflare clean IP ranges, safeguarding your VPS hosting IP from geolocation bans and reputation flags.
+
+Toggle this functionality on demand under **Network Settings > Cloudflare WARP Outbound**.
+
+---
+
+## Device Quotas & Expiration
+
+Each client profile can be configured with strict bandwidth and lifespan limits:
+- **Data Limit (GiB)**: Cumulative bidirectional traffic threshold. Setting `0` grants unlimited usage.
+- **Expiry Date**: Automatic decommission timestamp synchronized with browser local time.
+- **Enforcement Loop**: The panel daemon polls active interfaces every 5 seconds. When a device exhausts its allocated quota or passes its expiry date, its public key is revoked from the active interface immediately. Increasing the quota or extending the date instantly restores tunnel access.
+
+---
+
+## Updates
+
+To update an existing installation to the latest release:
+
+```bash
+sudo wg-auto-update
+```
+
+If updating from an earlier fork or legacy installation, bind the updater script to this repository once:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/update.sh -o /tmp/wg-auto-update.sh
 sudo bash /tmp/wg-auto-update.sh --install
 ```
 
-After that, use the panel's update button or:
+All existing client keys, routing parameters, and administrative credentials are preserved across updates.
+
+---
+
+## Service Management & Troubleshooting
+
+Diagnose system services and interfaces using standard systemd and WireGuard tooling:
 
 ```bash
-sudo wg-auto-update
-```
-
-Existing clients, keys and settings are preserved.
-
-## Troubleshooting
-
-```bash
+# Check panel service status
 sudo systemctl status wg-auto-panel --no-pager
+
+# Inspect active WireGuard peers and handshakes
 sudo wg show wgauto0
-sudo journalctl -u wg-auto-panel -n 50 --no-pager
+
+# Inspect active AmneziaWG peers and handshakes
+sudo awg show awg0
+
+# View real-time panel service logs
+sudo journalctl -u wg-auto-panel -n 50 -f
 ```
 
-If a device connects without internet, run **Check VPS networking** in the panel and check your provider firewall. DNS changes alone cannot fix an unreachable VPN server.
+---
 
 ## Development
 
 ```bash
-python build_panel.py
-python -m unittest -q test_panel test_local_app
+# Compile and package web assets into panel.html
+python3 build_panel.py
+
+# Execute test suite
+python3 -m unittest -v test_panel test_local_app
 ```
 
-UI sources are in `web/`; rebuild `panel.html` after editing them. See [UPSTREAM.md](UPSTREAM.md) for project background.
+UI source assets reside in `web/`. When modifying frontend logic, run `python3 build_panel.py` to regenerate the production `panel.html` template.
 
-## Device limits
+---
 
-Open a device?s **Data limit & expiry** section to set a combined upload/download quota in GiB and an expiry date in your browser?s local time. Zero quota means unlimited; empty expiry means never. Usage is persisted and limits are checked every five seconds while the panel service runs, even with the browser closed. Exhausted or expired keys are removed from the live VPN. Extend the limit or reset usage to restore access; manual pauses remain paused. Small overshoot is possible between checks. Counters cannot recover traffic already lost before this version was installed or during a service outage.
+## License
+
+This project is licensed under the [MIT License](LICENSE).

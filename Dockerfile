@@ -18,11 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
+SHELL ["/bin/bash", "-c"]
+
 WORKDIR /app
 COPY . .
 
 # Build pinned AmneziaWG binaries
-RUN mkdir -p /opt/diana-awg/{go,tools,bin} && \
+RUN mkdir -p /opt/diana-awg/go /opt/diana-awg/tools /opt/diana-awg/bin && \
     curl -fsSL https://codeload.github.com/amnezia-vpn/amneziawg-go/tar.gz/b5928efb6ca19f0153958460c3d141f04abc5c2e | tar -xz --strip-components=1 -C /opt/diana-awg/go && \
     curl -fsSL https://codeload.github.com/amnezia-vpn/amneziawg-tools/tar.gz/ee0f0a9aa34ff0a0da4b3433b9512781cfe02843 | tar -xz --strip-components=1 -C /opt/diana-awg/tools && \
     (cd /opt/diana-awg/go && go build -trimpath -o /opt/diana-awg/bin/amneziawg-go .) && \
