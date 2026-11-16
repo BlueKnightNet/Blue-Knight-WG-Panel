@@ -115,3 +115,4 @@ class PanelTestBase(unittest.TestCase):
 
 
 BasePanelTestCase = PanelTestBase
+TestCase = PanelTestBase

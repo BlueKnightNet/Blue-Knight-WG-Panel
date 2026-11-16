@@ -6,3 +6,6 @@ __pycache__/
 local-tools/
 *.log
 .playwright-mcp/
+.claude/
+.specify/
+GATES.md
