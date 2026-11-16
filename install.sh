@@ -33,9 +33,42 @@ if [[ -e $config ]]; then
   install_panel
   exit 0
 fi
+
+# Ask user if they want to install the native AmneziaWG kernel module (Ubuntu/Debian)
+install_kernel_mod="n"
+if [[ -t 0 ]]; then
+  echo ""
+  echo "Optional: Native AmneziaWG Linux Kernel Module"
+  echo "The panel includes amneziawg-go by default, but the native kernel module provides"
+  echo "maximum performance and reduced CPU usage."
+  read -r -p "Do you want to automatically install the native AmneziaWG kernel module? [y/N]: " choice || true
+  case "${choice:-}" in
+    [yY]|[yY][eE][sS]) install_kernel_mod="y" ;;
+    *) install_kernel_mod="n" ;;
+  esac
+fi
+
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y wireguard-tools iproute2 iptables curl ca-certificates qrencode
+
+if [[ "$install_kernel_mod" == "y" ]]; then
+  echo "Installing AmneziaWG kernel module from official repository for $ID..."
+  if [[ "$ID" == "ubuntu" ]]; then
+    apt-get install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" || true
+    add-apt-repository -y ppa:amnezia/ppa || true
+    apt-get update || true
+    apt-get install -y amneziawg amneziawg-dkms || true
+  elif [[ "$ID" == "debian" ]]; then
+    apt-get install -y software-properties-common python3-launchpadlib gnupg2 "linux-headers-$(uname -r)" || true
+    apt-key adv --keyserver keyserver.ubuntu.com --recv-keys 57290828 2>/dev/null || true
+    echo "deb https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main" > /etc/apt/sources.list.d/amnezia.list
+    echo "deb-src https://ppa.launchpadcontent.net/amnezia/ppa/ubuntu focal main" >> /etc/apt/sources.list.d/amnezia.list
+    apt-get update || true
+    apt-get install -y amneziawg amneziawg-dkms || true
+  fi
+  modprobe amneziawg 2>/dev/null && echo "Native AmneziaWG kernel module loaded successfully." || echo "Kernel module build complete or fallback to amneziawg-go will be used."
+fi
 
 endpoint=${WG_ENDPOINT:-}
 if [[ -z $endpoint ]]; then

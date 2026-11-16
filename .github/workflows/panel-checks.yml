@@ -1,4 +1,4 @@
-name: Panel and AmneziaWG checks
+name: Panel and Multi-Protocol Tunnel Checks
 on:
   push:
     branches: [blue-knight-net, main]
@@ -44,7 +44,7 @@ jobs:
         run: |
           node -c web/panel.js
           python3 build_panel.py && git diff --exit-code panel.html
-          bash -n install.sh update.sh awg-install.sh test_awg_linux.sh test_e2e_real_tunnel.sh
+          bash -n install.sh update.sh awg-install.sh test_awg_linux.sh test_e2e_real_tunnel.sh docker-entrypoint.sh
   real-tunnel-e2e:
     name: Real Tunnel E2E (${{ matrix.arch }})
     needs: [panel]

@@ -61,6 +61,29 @@ Create a separate device for each phone or computer. Recent handshakes show acti
 
 AmneziaWG uses separate keys and settings. Its configs require a compatible client.
 
+## Docker Deployment (GHCR)
+
+Multi-architecture Docker images (`linux/amd64` and `linux/arm64`) are published automatically on merge:
+
+```bash
+docker run -d \
+  --name blue-knight-panel \
+  --restart unless-stopped \
+  --cap-add=NET_ADMIN \
+  --cap-add=NET_RAW \
+  -v /dev/net/tun:/dev/net/tun \
+  -v /etc/wireguard:/etc/wireguard \
+  -v /etc/amnezia/amneziawg:/etc/amnezia/amneziawg \
+  -v /opt/wg-auto:/opt/wg-auto \
+  -p 8787:8787/tcp \
+  -p 51820:51820/udp \
+  -p 51821:51821/udp \
+  ghcr.io/blueknightnet/blue-knight-wg-panel:latest
+```
+
+### AmneziaWG Kernel Module vs Userspace Fallback
+By default, the container automatically uses the host system's native **`amneziawg` kernel module** if installed on the host (recommended for maximum throughput). If the host kernel module is not present, it automatically and seamlessly falls back to the built-in **`amneziawg-go`** userspace engine.
+
 ## Update
 
 For an existing installation, switch its updater to this repository once:
