@@ -82,7 +82,17 @@ docker run -d \
 ```
 
 ### AmneziaWG Kernel Module vs Userspace Fallback
-By default, the container automatically uses the host system's native **`amneziawg` kernel module** if installed on the host (recommended for maximum throughput). If the host kernel module is not present, it automatically and seamlessly falls back to the built-in **`amneziawg-go`** userspace engine.
+By default, the panel and container prioritize the host system's native **`amneziawg` kernel module** if available (recommended for maximum throughput and low CPU usage). If the host kernel module is not present, it automatically and seamlessly falls back to the built-in **`amneziawg-go`** userspace engine.
+
+To install the native kernel module on your host VPS, follow the official instructions at [amnezia-vpn/amneziawg-linux-kernel-module](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module):
+- **Ubuntu**:
+  ```bash
+  sudo add-apt-repository -y ppa:amnezia/ppa
+  sudo apt-get update
+  sudo apt-get install -y amneziawg amneziawg-dkms
+  ```
+- **Debian**: Follow the Launchpad repository setup in the [kernel module repository](https://github.com/amnezia-vpn/amneziawg-linux-kernel-module#debian).
+- When using `install.sh`, the installer will also interactively offer to install the kernel module for you.
 
 ## Update
 
