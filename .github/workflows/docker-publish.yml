@@ -1,0 +1,163 @@
+name: Publish Docker Image
+
+on:
+  workflow_run:
+    workflows: ["Panel and Multi-Protocol Tunnel Checks"]
+    types: [completed]
+    branches: [blue-knight-net]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: docker-publish-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  prepare:
+    name: Prepare metadata
+    if: >-
+      !cancelled() && (
+        github.event_name != 'workflow_run' ||
+        github.event.workflow_run.conclusion == 'success'
+      )
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      labels: ${{ steps.meta.outputs.labels }}
+      json: ${{ steps.meta.outputs.json }}
+      version: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Extract image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=latest,enable=${{ github.event_name == 'workflow_run' || startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/blue-knight-net' || github.event_name == 'workflow_dispatch' }}
+            type=raw,value=edge,enable=${{ github.event_name == 'workflow_run' || (github.ref == 'refs/heads/blue-knight-net' && !startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch' }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=tag
+            type=sha,format=short
+          labels: |
+            org.opencontainers.image.title=Blue Knight WG Panel
+            org.opencontainers.image.description=AmneziaWG, WireGuard and Cloudflare WARP Management Panel
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+
+  build:
+    name: Build image (${{ matrix.arch }})
+    needs: prepare
+    if: >-
+      !cancelled() && needs.prepare.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image by digest
+        id: build
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: ${{ matrix.platform }}
+          outputs: type=image,name=ghcr.io/${{ github.repository }},push-by-digest=true,name-canonical=true,push=true
+          cache-from: type=gha,scope=panel-docker-${{ matrix.arch }}
+          cache-to: type=gha,scope=panel-docker-${{ matrix.arch }},mode=max
+          labels: ${{ needs.prepare.outputs.labels }}
+          provenance: false
+          sbom: false
+
+      - name: Export digest
+        run: |
+          mkdir -p /tmp/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "/tmp/digests/${digest#sha256:}"
+
+      - name: Upload digest artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digest-${{ matrix.arch }}
+          path: /tmp/digests/*
+          if-no-files-found: error
+
+  merge:
+    name: Merge and publish manifest
+    needs: [prepare, build]
+    if: >-
+      !cancelled() && needs.build.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Download digests
+        uses: actions/download-artifact@v4
+        with:
+          pattern: digest-*
+          path: /tmp/digests
+          merge-multiple: true
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest and push
+        env:
+          DOCKER_METADATA_OUTPUT_JSON: ${{ needs.prepare.outputs.json }}
+          TAGS_RAW: ${{ needs.prepare.outputs.tags }}
+        run: |
+          set -euo pipefail
+          cd /tmp/digests
+          if [ -n "${DOCKER_METADATA_OUTPUT_JSON:-}" ] && command -v jq >/dev/null 2>&1; then
+            TAG_ARGS=$(jq -cr '.tags | map("-t " + .) | join(" ")' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+            FIRST_TAG=$(jq -r '.tags[0]' <<< "$DOCKER_METADATA_OUTPUT_JSON")
+          else
+            TAG_ARGS=$(echo "$TAGS_RAW" | sed '/^$/d' | sed 's/^/-t /' | tr '\n' ' ')
+            FIRST_TAG=$(echo "$TAGS_RAW" | head -n1)
+          fi
+          docker buildx imagetools create $TAG_ARGS \
+            $(printf 'ghcr.io/${{ github.repository }}@sha256:%s ' *)
+          docker buildx imagetools inspect "$FIRST_TAG"

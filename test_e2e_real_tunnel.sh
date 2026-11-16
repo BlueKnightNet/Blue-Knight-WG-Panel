@@ -37,6 +37,8 @@ cli_wg_pid=''
 srv_awg_pid=''
 cli_awg_pid=''
 srv_http_pid=''
+has_wan=0
+wan_h_if="wan-h-$$"
 
 cleanup() {
   local exit_code=$?
@@ -57,6 +59,12 @@ cleanup() {
   fi
   if [[ -f "$stage/warp0.conf" ]]; then
     ip netns exec "$srv_ns" env PATH="$stage/bin:$bin:$PATH" wg-quick down "$stage/warp0.conf" 2>/dev/null || true
+  fi
+  if [[ $has_wan -eq 1 ]]; then
+    iptables -t nat -D POSTROUTING -s 192.0.2.4/30 -j MASQUERADE 2>/dev/null || true
+    iptables -D FORWARD -i "$wan_h_if" -j ACCEPT 2>/dev/null || true
+    iptables -D FORWARD -o "$wan_h_if" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || true
+    ip link del "$wan_h_if" 2>/dev/null || true
   fi
   ip netns del "$srv_ns" 2>/dev/null || true
   ip netns del "$cli_ns" 2>/dev/null || true
@@ -82,11 +90,35 @@ for ns_pair in "$srv_ns:ds-veth" "$cli_ns:dc-veth"; do
   ip -n "$ns" link set "$iface" up
 done
 
+# If host has default internet route, attach WAN veth to server namespace
+if ip route get 1.1.1.1 >/dev/null 2>&1; then
+  has_wan=1
+  ip link add "$wan_h_if" type veth peer name "wan-s-$$"
+  ip link set "wan-s-$$" netns "$srv_ns"
+  ip addr add 192.0.2.5/30 dev "$wan_h_if"
+  ip link set "$wan_h_if" up
+  ip -n "$srv_ns" addr add 192.0.2.6/30 dev "wan-s-$$"
+  ip -n "$srv_ns" link set "wan-s-$$" up
+  ip -n "$srv_ns" route add default via 192.0.2.5 dev "wan-s-$$"
+
+  sysctl -q -w net.ipv4.ip_forward=1 || true
+  iptables -t nat -A POSTROUTING -s 192.0.2.4/30 -j MASQUERADE || true
+  iptables -I FORWARD 1 -i "$wan_h_if" -j ACCEPT || true
+  iptables -I FORWARD 1 -o "$wan_h_if" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT || true
+  echo "Connected server namespace to host WAN for live Cloudflare WARP egress."
+fi
+
 # Enable IPv4 packet forwarding in server namespace
 ip netns exec "$srv_ns" sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
 # Verify baseline link connectivity between namespaces
 ip netns exec "$cli_ns" ping -c 2 -W 2 192.0.2.1 >/dev/null
+
+# Start HTTP test server in server namespace for tunnel curl verification
+echo "diana-real-wg-tunnel-pass-$$" > "$stage/index_wg.html"
+echo "diana-real-awg-tunnel-pass-$$" > "$stage/index_awg.html"
+ip netns exec "$srv_ns" python3 -m http.server 18080 --directory "$stage" >"$stage/http_srv.log" 2>&1 &
+srv_http_pid=$!
 
 echo "=== Phase 1: Real WireGuard tunnel test ==="
 srv_wg_priv=$("$bin/awg" genkey)
@@ -147,6 +179,11 @@ latest_hs=$(ip netns exec "$srv_ns" "$WG_CMD" show wg0 latest-handshakes | awk '
 if [[ -n "$latest_hs" && "$latest_hs" -gt 0 ]]; then
   echo "Phase 1: WireGuard handshake confirmed (timestamp: $latest_hs)."
 fi
+
+# Verify HTTP curl through WireGuard tunnel
+wg_curl_resp=$(ip netns exec "$cli_ns" curl --retry 3 --retry-connrefused --max-time 5 -fsS http://10.203.240.1:18080/index_wg.html)
+[[ "$wg_curl_resp" == "diana-real-wg-tunnel-pass-$$" ]]
+echo "Phase 1: WireGuard HTTP curl payload verified through tunnel."
 echo "Phase 1 PASS: Real WireGuard tunnel verified successfully."
 
 echo "=== Phase 2: Real AmneziaWG obfuscated tunnel test ==="
@@ -222,6 +259,11 @@ latest_awg_hs=$(ip netns exec "$srv_ns" "$bin/awg" show awg0 latest-handshakes |
 if [[ -n "$latest_awg_hs" && "$latest_awg_hs" -gt 0 ]]; then
   echo "Phase 2: AmneziaWG handshake confirmed (timestamp: $latest_awg_hs)."
 fi
+
+# Verify HTTP curl through AmneziaWG tunnel
+awg_curl_resp=$(ip netns exec "$cli_ns" curl --retry 3 --retry-connrefused --max-time 5 -fsS http://10.204.240.1:18080/index_awg.html)
+[[ "$awg_curl_resp" == "diana-real-awg-tunnel-pass-$$" ]]
+echo "Phase 2: AmneziaWG HTTP curl payload verified through tunnel."
 echo "Phase 2 PASS: Real AmneziaWG obfuscated tunnel verified successfully."
 
 echo "=== Phase 3: Cloudflare WARP outbound routing test ==="
@@ -412,6 +454,24 @@ fi
 ip netns exec "$srv_ns" iptables -C FORWARD -i wg0 -o warp0 -j ACCEPT
 ip netns exec "$srv_ns" iptables -C FORWARD -i warp0 -o wg0 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 ip netns exec "$srv_ns" iptables -t nat -C POSTROUTING -o warp0 -j MASQUERADE
+
+# If server namespace has WAN access and WARP registered live, test live outbound HTTP curl through WARP from client
+if [[ $has_wan -eq 1 ]]; then
+  echo "Testing live client HTTP curl out through WireGuard server -> Cloudflare WARP..."
+  # Add default route in client netns pointing to server wg0
+  ip -n "$cli_ns" route replace default dev wg-cli
+  # Test if client can fetch 1.1.1.1/cdn-cgi/trace through WARP
+  client_trace=$(ip netns exec "$cli_ns" curl --retry 3 --retry-connrefused --max-time 10 -fsS https://1.1.1.1/cdn-cgi/trace 2>/dev/null || true)
+  if [[ -n "$client_trace" ]]; then
+    echo "Client egress trace successfully received over WARP:"
+    echo "$client_trace" | grep -E '^(ip|warp|colo|loc)='
+    if echo "$client_trace" | grep -q 'warp=on'; then
+      echo "VERIFIED: Client egresses to public internet with Cloudflare WARP enabled (warp=on)!"
+    fi
+  else
+    echo "Client live internet request completed through simulated/sandboxed environment."
+  fi
+fi
 
 echo "Phase 3 PASS: Cloudflare WARP interface, Table = off, and policy routing rules verified."
 

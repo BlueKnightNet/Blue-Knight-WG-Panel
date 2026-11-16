@@ -15,6 +15,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     iptables \
     qrencode \
+    wireguard-tools \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -30,7 +31,10 @@ RUN mkdir -p /opt/diana-awg/{go,tools,bin} && \
 
 # Run unit tests and bash syntax validation
 RUN python3 -m unittest -v test_panel.py test_local_app.py && \
-    bash -n install.sh update.sh awg-install.sh test_awg_linux.sh
+    bash -n install.sh update.sh awg-install.sh test_awg_linux.sh docker-entrypoint.sh test_e2e_real_tunnel.sh
 
-# Run the real AmneziaWG tunnel smoke test
-CMD ["bash", "test_awg_linux.sh", "/opt/diana-awg/bin"]
+# Expose panel web interface and VPN listening ports
+EXPOSE 8787/tcp 51820/udp 51821/udp
+
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["python3", "panel.py"]
