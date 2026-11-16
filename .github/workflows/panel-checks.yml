@@ -1,7 +1,7 @@
 name: Panel and AmneziaWG checks
 on:
   push:
-    branches: [main]
+    branches: [blue-knight-net, main]
   pull_request:
 permissions:
   contents: read

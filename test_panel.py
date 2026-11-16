@@ -449,7 +449,7 @@ class PanelTests(unittest.TestCase):
         state = json.loads(json.dumps(self.state))
         state.update(protocol='amneziawg', port=51821, network='10.204.240.0/24')
         state['header'] = state['header'].replace('10.203.240.1', '10.204.240.1').replace('51820', '51821')
-        state['header'] += '\nJc = 4\nJmin = 40\nJmax = 700\nS1 = 20\nS2 = 50\nS3 = 64\nS4 = 16\nH1 = 100001\nH2 = 200001\nH3 = 300001\nH4 = 400001\nHeaderProtectionKey = secret-header-key\nContentPaddingAddition = 0-16'
+        state['header'] += '\nJc = 4\nJmin = 40\nJmax = 700\nS1 = 20\nS2 = 50\nH1 = 100001\nH2 = 200001\nH3 = 300001\nH4 = 400001'
         state['clients'][0]['address'] = '10.204.240.2'
         state['unmanaged'] = []
         panel.atomic(panel.state_path(state), json.dumps(state))
@@ -474,8 +474,13 @@ class PanelTests(unittest.TestCase):
         self.prepare_awg()
         base = '/api/awg/clients/0123456789abcdef/'
         text = self.request(base + 'config').read().decode()
-        self.assertIn('HeaderProtectionKey = secret-header-key', text)
-        self.assertIn('ContentPaddingAddition = 0-16', text)
+        self.assertIn('Jc = 4', text)
+        self.assertIn('S1 = 20', text)
+        self.assertIn('H1 = 100001', text)
+        self.assertNotIn('HeaderProtectionKey', text)
+        self.assertNotIn('ContentPaddingAddition', text)
+        self.assertNotIn('S3', text)
+        self.assertNotIn('S4', text)
         self.assertIn('Endpoint = vpn.example.com:51821', text)
         self.assertIn('Address = 10.204.240.2/32', text)
         for kind in ('uri', 'xray', 'compatible'):
@@ -483,9 +488,23 @@ class PanelTests(unittest.TestCase):
         status = json.load(self.request('/api/awg/status'))
         self.assertEqual(status['protocol'], 'amneziawg')
         self.assertEqual(status['interface'], 'awgauto0')
-        self.assertNotIn('secret-header-key', json.dumps(status))
         self.assertEqual(status['obfuscation']['Jc'], '4')
         self.assertIn((panel.AWG_BIN + 'awg', 'show', 'awgauto0', 'dump'), self.commands)
+
+    def test_legacy_awg_keys_sanitized_from_header_and_export(self):
+        state = self.prepare_awg()
+        state['header'] += '\nS3 = 64\nS4 = 16\nHeaderProtectionKey = legacy-key\nContentPaddingAddition = 0-16'
+        panel.atomic(panel.state_path(state), json.dumps(state))
+        loaded = panel.load('amneziawg')
+        self.assertNotIn('HeaderProtectionKey', loaded['header'])
+        self.assertNotIn('ContentPaddingAddition', loaded['header'])
+        self.assertNotIn('S3', loaded['header'])
+        self.assertNotIn('S4', loaded['header'])
+        config_text = panel.client_config(loaded, loaded['clients'][0])
+        self.assertNotIn('HeaderProtectionKey', config_text)
+        self.assertNotIn('ContentPaddingAddition', config_text)
+        self.assertNotIn('S3', config_text)
+        self.assertNotIn('S4', config_text)
 
     def test_awg_changes_never_touch_wireguard_state_or_config(self):
         self.prepare_awg()

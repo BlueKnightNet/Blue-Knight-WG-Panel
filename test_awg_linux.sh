@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Real AWG 3.1 tunnel smoke test in disposable Linux network namespaces.
+# Real AWG tunnel smoke test in disposable Linux network namespaces.
 # Never uses existing VPN keys, configuration, interfaces or firewall rules.
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Run this test as root in a disposable Linux VM.' >&2; exit 1; }
@@ -44,7 +44,6 @@ client_key=$("$bin/awg" genkey)
 server_pub=$(printf '%s' "$server_key" | "$bin/awg" pubkey)
 client_pub=$(printf '%s' "$client_key" | "$bin/awg" pubkey)
 psk=$("$bin/awg" genpsk)
-header_key=$("$bin/awg" genkey)
 for role in server client; do
   if [[ $role == server ]]; then private=$server_key; peer=$client_pub; address=10.207.0.2; endpoint=192.0.2.2; else private=$client_key; peer=$server_pub; address=10.207.0.1; endpoint=192.0.2.1; fi
   cat > "$stage/$role.conf" <<EOF
@@ -56,14 +55,10 @@ Jmin = 40
 Jmax = 700
 S1 = 20
 S2 = 50
-S3 = 64
-S4 = 16
 H1 = 100001
 H2 = 200001
 H3 = 300001
 H4 = 400001
-HeaderProtectionKey = $header_key
-ContentPaddingAddition = 0-16
 [Peer]
 PublicKey = $peer
 PresharedKey = $psk
@@ -79,9 +74,9 @@ ip -n "$client" addr add 10.207.0.2/24 dev "$cli_if"
 ip -n "$server" link set "$srv_if" mtu 1280 up
 ip -n "$client" link set "$cli_if" mtu 1280 up
 ip netns exec "$client" ping -c 3 -W 5 10.207.0.1
-printf 'diana-awg-3.1-smoke\n' > "$stage/index.html"
+printf 'diana-awg-smoke\n' > "$stage/index.html"
 chmod 755 "$stage"
 ip netns exec "$server" python3 -m http.server 18080 --bind 10.207.0.1 --directory "$stage" >"$stage/http.log" 2>&1 & http_pid=$!
 response=$(ip netns exec "$client" curl --noproxy '*' --retry 5 --retry-connrefused --retry-delay 1 --max-time 15 -fsS http://10.207.0.1:18080/)
-[[ $response == diana-awg-3.1-smoke ]]
-echo 'PASS: AWG 3.1 handshake, ICMP and HTTP over an isolated obfuscated tunnel.'
+[[ $response == diana-awg-smoke ]]
+echo 'PASS: AWG handshake, ICMP and HTTP over an isolated obfuscated tunnel.'

@@ -82,7 +82,7 @@ def parse_config(text):
         dns = interface.get('DNS', '1.1.1.1')
         mtu, keepalive = int(interface.get('MTU', 1280)), int(peer.get('PersistentKeepalive', 25))
         name = 'tuned-client'
-    if not host or not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', host) or not 1 <= port <= 65535:
+    if not host or port is None or not re.fullmatch(r'[A-Za-z0-9.-]{1,253}', host) or not 1 <= port <= 65535:
         raise ValueError('An IPv4 or hostname endpoint and valid port are required.')
     if not valid_key(private) or not valid_key(public) or (psk and not valid_key(psk)):
         raise ValueError('Invalid WireGuard key encoding.')
@@ -90,7 +90,7 @@ def parse_config(text):
     if addr.version != 4:
         raise ValueError('This tuner currently supports IPv4 client addresses.')
     if not 576 <= mtu <= 1420 or not 0 <= keepalive <= 120:
-        raise ValueError('Use an MTU of 1280–1420 and keepalive of 0–120.')
+        raise ValueError('Use an MTU of 576–1420 and keepalive of 0–120.')
     dns = panel.normalize_dns(dns, required=True)
     return dict(state=dict(host=host, port=port, serverPublic=public, dns=dns, mtu=mtu),
                 client=dict(name=re.sub(r'[^A-Za-z0-9_-]', '-', name)[:40], address=str(addr.ip),
