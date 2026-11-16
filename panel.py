@@ -620,7 +620,13 @@ def account_usage(state):
             counters[parts[0]] = (int(parts[1]), int(parts[2]))
     changed = False
     for client in state['clients']:
-        rx, tx = counters.get(client['public'], (0, 0))
+        if client['public'] not in counters:
+            reason = limit_reason(client)
+            if client.get('limitBlocked', '') != reason:
+                client['limitBlocked'] = reason
+                changed = True
+            continue
+        rx, tx = counters[client['public']]
         old_rx, old_tx = client.get('lastRx', 0), client.get('lastTx', 0)
         delta = (rx - old_rx if rx >= old_rx else rx) + (tx - old_tx if tx >= old_tx else tx)
         client['usedBytes'] = client.get('usedBytes', 0) + delta
@@ -669,13 +675,15 @@ def sync(text, state=None):
         run(command, 'syncconf', iface, name)
         # Explicitly remove retired keys: do not rely on a protocol engine's
         # syncconf implementation to invalidate existing sessions.
-        desired = {fields(block).get('PublicKey') for block in text.split('[Peer]')[1:]}
-        previous = engine(state or {})[3].read_text()
-        retired = {fields(block).get('PublicKey') for block in previous.split('[Peer]')[1:]} - desired
+        desired = {fields(block).get('PublicKey', '').split('#')[0].strip() for block in text.split('[Peer]')[1:]} - {None, ''}
         live = set(run(command, 'show', iface, 'peers').split())
-        for public in (retired | (live - desired)) - {None, ''}:
-            run(command, 'set', iface, 'peer', public, 'remove')
-        if set(run(command, 'show', iface, 'peers').split()) - desired:
+        for public in (live - desired) - {None, ''}:
+            try:
+                run(command, 'set', iface, 'peer', public, 'remove')
+            except Exception:
+                pass
+        remaining = set(run(command, 'show', iface, 'peers').split()) - desired
+        if remaining:
             raise RuntimeError('VPN peer removal could not be verified.')
 
     finally:
@@ -1144,7 +1152,9 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {'error': 'Unable to read panel state. Check the service journal.'})
 
     def do_POST(self):
-        if not MUTATION_LOCK.acquire(timeout=5):
+        if not self.authorized():
+            return
+        if not MUTATION_LOCK.acquire(timeout=10):
             return self.send(409, {'error': 'Another operation is running. Try again shortly.'})
         try:
             self.post_locked()
@@ -1152,8 +1162,6 @@ class Handler(BaseHTTPRequestHandler):
             MUTATION_LOCK.release()
 
     def post_locked(self):
-        if not self.authorized():
-            return
         # Custom header prevents browser form/CSRF requests; no cross-origin CORS access.
         if self.headers.get('X-WG-Panel') != '1' or self.headers.get('Content-Type') != 'application/json':
             return self.send(403, {'error': 'Invalid panel request'})
@@ -1197,30 +1205,59 @@ class Handler(BaseHTTPRequestHandler):
             if details_match:
                 client = next((c for c in state['clients'] if c['id'] == details_match[1]), None)
                 if not client:
-                    raise ValueError('Client not found.')
-                if 'quotaBytes' in body or 'expiresAt' in body or body.get('resetUsage'):
-                    account_usage(state)
-                    for key in ('quotaBytes', 'expiresAt'):
-                        if key in body:
-                            value = body[key]
-                            if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**16:
-                                raise ValueError('Limits must be non-negative whole numbers.')
-                            client[key] = value
-                    if body.get('resetUsage') is True:
-                        client['usedBytes'] = 0
-                    client['limitBlocked'] = limit_reason(client)
-                    save(state)
+                    return self.send(404, {'error': 'Client not found.'})
+                # Atomic validation: validate all incoming body fields before mutating client
+                new_name = None
+                new_enabled = None
+                new_quota = None
+                new_expires = None
+                reset_usage = False
+
                 if 'name' in body:
                     name = str(body['name']).strip()
                     if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', name):
                         raise ValueError('Use 1–40 letters, numbers, underscores or hyphens.')
                     if any(c['id'] != client['id'] and c['name'] == name for c in state['clients']):
                         raise ValueError('Client name already exists.')
-                    client['name'] = name
+                    new_name = name
                 if 'enabled' in body:
                     if not isinstance(body['enabled'], bool):
                         raise ValueError('Enabled must be true or false.')
-                    client['enabled'] = body['enabled']
+                    new_enabled = body['enabled']
+                if 'quotaBytes' in body:
+                    value = body['quotaBytes']
+                    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 10**16:
+                        raise ValueError('Limits must be non-negative whole numbers.')
+                    new_quota = value
+                if 'expiresAt' in body:
+                    value = body['expiresAt']
+                    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= 4 * 10**9:
+                        raise ValueError('Limits must be non-negative whole numbers.')
+                    new_expires = value
+                if body.get('resetUsage') is True:
+                    reset_usage = True
+
+                # Apply validated changes
+                need_save = False
+                if new_quota is not None or new_expires is not None or reset_usage:
+                    account_usage(state)
+                    if new_quota is not None:
+                        client['quotaBytes'] = new_quota
+                    if new_expires is not None:
+                        client['expiresAt'] = new_expires
+                    if reset_usage:
+                        client['usedBytes'] = 0
+                    client['limitBlocked'] = limit_reason(client)
+                    need_save = True
+
+                if new_name is not None:
+                    client['name'] = new_name
+
+                if new_enabled is not None:
+                    client['enabled'] = new_enabled
+                    need_save = True
+
+                if need_save:
                     save(state)
                 else:
                     atomic(state_path(state), json.dumps(state))
@@ -1229,7 +1266,7 @@ class Handler(BaseHTTPRequestHandler):
                 ids = body.get('ids')
                 action = body.get('action')
                 if not isinstance(ids, list) or not 1 <= len(ids) <= 64 or action not in ('enable', 'disable'):
-                    raise ValueError('Select 1ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“64 clients and choose enable or disable.')
+                    raise ValueError('Select 1-64 clients and choose enable or disable.')
                 if any(not isinstance(item, str) for item in ids):
                     raise ValueError('Invalid client selection.')
                 selected = [c for c in state['clients'] if c['id'] in ids]
@@ -1242,7 +1279,7 @@ class Handler(BaseHTTPRequestHandler):
             elif tuning_match:
                 client = next((c for c in state['clients'] if c['id'] == tuning_match[1]), None)
                 if not client:
-                    raise ValueError('Client not found.')
+                    return self.send(404, {'error': 'Client not found.'})
                 set_tuning(client, body, state)
                 atomic(state_path(state), json.dumps(state))
                 sync_warp_routing(state)
@@ -1313,8 +1350,28 @@ class Handler(BaseHTTPRequestHandler):
                 audit('Created client ' + name)
             elif self.path == '/api/revoke':
                 target = body.get('id')
-                if not any(c['id'] == target for c in state['clients']):
-                    raise ValueError('Client not found.')
+                target_client = next((c for c in state['clients'] if c['id'] == target), None)
+                if not target_client:
+                    return self.send(404, {'error': 'Client not found.'})
+                command, _, iface, _, _ = engine(state)
+                try:
+                    run(command, 'set', iface, 'peer', target_client['public'], 'remove')
+                except Exception:
+                    pass
+                addr = target_client.get('address')
+                if addr:
+                    try:
+                        run('conntrack', '-D', '-s', addr)
+                    except Exception:
+                        pass
+                    try:
+                        run('conntrack', '-D', '-d', addr)
+                    except Exception:
+                        pass
+                    try:
+                        run('ip', 'rule', 'del', 'from', f"{addr}/32", 'table', '100', 'priority', '14500')
+                    except Exception:
+                        pass
                 state['clients'] = [c for c in state['clients'] if c['id'] != target]
                 save(state)
                 audit('Revoked a client')
