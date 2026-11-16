@@ -381,13 +381,55 @@ def awg_install_status():
     return result
 
 
+WARP_FALLBACK_ENDPOINTS = [
+    '162.159.192.1:2408',
+    '162.159.192.1:500',
+    '162.159.192.1:4500',
+    '162.159.193.1:2408',
+    '162.159.193.1:500',
+    '162.159.193.1:4500',
+    '162.159.195.1:2408',
+    '162.159.195.1:500',
+    '162.159.195.1:4500',
+    '188.114.96.1:500',
+    '188.114.97.1:500',
+    '188.114.98.1:500',
+    '188.114.99.1:500',
+]
+
+
 def warp_endpoint(endpoint, ports=()):
-    """The registration API can return an IPv4 endpoint with placeholder port 0."""
-    host, separator, port = str(endpoint).rpartition(':')
-    if not separator:
-        host, port = str(endpoint), '0'
-    host = str(ipaddress.IPv4Address(host))
-    port = int(port)
+    """Validate or repair a WARP endpoint, resolving port 0 to an available port."""
+    endpoint_str = str(endpoint).strip()
+    if endpoint_str.startswith('[') and ']:' in endpoint_str:
+        host_part, _, port_part = endpoint_str[1:].partition(']:')
+        host = f'[{ipaddress.IPv6Address(host_part)}]'
+        try:
+            port = int(port_part)
+        except ValueError:
+            raise ValueError('Invalid WARP endpoint port.')
+    elif ':' in endpoint_str:
+        host_part, _, port_part = endpoint_str.rpartition(':')
+        try:
+            host = str(ipaddress.IPv4Address(host_part))
+        except ValueError:
+            if re.fullmatch(r'[A-Za-z0-9.-]+', host_part):
+                host = host_part
+            else:
+                raise ValueError('Invalid WARP endpoint host.')
+        try:
+            port = int(port_part)
+        except ValueError:
+            raise ValueError('Invalid WARP endpoint port.')
+    else:
+        try:
+            host = str(ipaddress.IPv4Address(endpoint_str))
+        except ValueError:
+            if re.fullmatch(r'[A-Za-z0-9.-]+', endpoint_str):
+                host = endpoint_str
+            else:
+                raise ValueError('Invalid WARP endpoint host.')
+        port = 0
     if port == 0:
         port = next((p for p in ports if isinstance(p, int) and not isinstance(p, bool) and 1 <= p <= 65535), 2408)
     if not 1 <= port <= 65535:
@@ -473,13 +515,60 @@ def warp_status():
         active = 'warp0' in run('ip', 'link', 'show', 'warp0')
     except Exception:
         pass
+    handshake = 0
+    rx_bytes = 0
+    tx_bytes = 0
+    if active:
+        try:
+            dump = run('wg', 'show', WARP_IFACE, 'dump').splitlines()
+            if len(dump) > 1:
+                parts = dump[1].split()
+                if len(parts) >= 8:
+                    handshake = int(parts[4])
+                    rx_bytes = int(parts[5])
+                    tx_bytes = int(parts[6])
+        except Exception:
+            pass
+    now = time.time()
+    connected = active and handshake > 0 and (now - handshake) < 180 and rx_bytes > 0
     return {
         'registered': account is not None,
         'installed': WARP_CONFIG.exists(),
         'active': active,
+        'connected': connected,
+        'handshake': handshake,
+        'rx': rx_bytes,
+        'tx': tx_bytes,
         'ipv4': (account or {}).get('ipv4', ''),
         'endpoint': (account or {}).get('endpoint', ''),
+        'fallbackEndpoints': WARP_FALLBACK_ENDPOINTS,
     }
+
+
+def set_warp_endpoint(endpoint):
+    """Set and persist a new WARP endpoint, updating the live WireGuard peer if active."""
+    endpoint = warp_endpoint(endpoint)
+    if not WARP_CONFIG.exists():
+        raise ValueError('Cloudflare WARP is not configured.')
+    config = WARP_CONFIG.read_text()
+    endpoint_match = re.search(r'^Endpoint\s*=\s*(\S+)\s*$', config, re.MULTILINE)
+    if endpoint_match:
+        config = config[:endpoint_match.start(1)] + endpoint + config[endpoint_match.end(1):]
+        atomic(WARP_CONFIG, config)
+    account_path = ROOT / 'warp.json'
+    if account_path.exists():
+        try:
+            account = json.loads(account_path.read_text())
+            account['endpoint'] = endpoint
+            atomic(account_path, json.dumps(account, indent=2))
+        except Exception:
+            pass
+    status = warp_status()
+    if status['active']:
+        peer = re.search(r'^PublicKey\s*=\s*(\S+)\s*$', config, re.MULTILINE)
+        if peer:
+            run('wg', 'set', WARP_IFACE, 'peer', peer[1], 'endpoint', endpoint)
+    return warp_status()
 
 
 def ensure_warp_interface():
@@ -935,6 +1024,17 @@ def diagnostics(state):
             ipaddress.IPv4Address(public_ip)
         except ValueError:
             checks[-1].update(ok=False, detail='Unexpected response from IP check')
+    if state.get('warpOutbound') or any((c.get('warp') == 'enabled' or c.get('tuning', {}).get('warp') == 'enabled') for c in state.get('clients', [])):
+        w = warp_status()
+        if not w['active']:
+            checks.append(dict(label='Cloudflare WARP interface', ok=False, detail='warp0 interface is inactive. Clients routed through WARP cannot reach the internet.'))
+        elif not w['connected']:
+            if w.get('handshake', 0) == 0:
+                checks.append(dict(label='Cloudflare WARP handshake', ok=False, detail=f"No handshake received from {w['endpoint'] or 'Cloudflare'}. Outbound UDP port 2408/500/4500 may be blocked by your VPS provider or cloud firewall."))
+            else:
+                checks.append(dict(label='Cloudflare WARP handshake', ok=False, detail=f"Handshake stalled on {w['endpoint'] or 'Cloudflare'} (last seen over 3 minutes ago)."))
+        else:
+            checks.append(dict(label='Cloudflare WARP handshake', ok=True, detail=f"Active connection with {w['endpoint']} ({w['rx']} bytes received)"))
     return dict(checks=checks, note='These are read-only server checks. A handshake proves peer connectivity, not internet access. Cloud firewalls, ISP filtering, client routing and path MTU require client-side tests.')
 
 
@@ -1382,6 +1482,26 @@ class Handler(BaseHTTPRequestHandler):
                     atomic(state_path(state), json.dumps(state))
                     sync_warp_routing(state)
                     audit(('Enabled' if state['warpOutbound'] else 'Disabled') + ' Cloudflare WARP outbound for ' + protocol)
+                elif action == 'endpoint':
+                    ep = body.get('endpoint')
+                    if not ep:
+                        raise ValueError('Endpoint is required.')
+                    set_warp_endpoint(ep)
+                    audit('Updated Cloudflare WARP endpoint to ' + str(ep))
+                elif action == 'rotate':
+                    account_path = ROOT / 'warp.json'
+                    current = ''
+                    if account_path.exists():
+                        try:
+                            current = json.loads(account_path.read_text()).get('endpoint', '')
+                        except Exception:
+                            pass
+                    idx = 0
+                    if current in WARP_FALLBACK_ENDPOINTS:
+                        idx = (WARP_FALLBACK_ENDPOINTS.index(current) + 1) % len(WARP_FALLBACK_ENDPOINTS)
+                    next_ep = WARP_FALLBACK_ENDPOINTS[idx]
+                    set_warp_endpoint(next_ep)
+                    audit('Switched Cloudflare WARP endpoint to ' + next_ep)
                 elif action == 'reset':
                     stop_warp_interface()
                     try:
