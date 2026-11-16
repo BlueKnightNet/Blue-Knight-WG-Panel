@@ -601,6 +601,34 @@ def sync_warp_routing(state):
 
 
 
+
+def delete_clients(state, clients):
+    """Remove selected peers and saved configs, then clean up their sessions."""
+    command, _, iface, _, _ = engine(state)
+    for client in clients:
+        try:
+            run(command, 'set', iface, 'peer', client['public'], 'remove')
+        except Exception:
+            pass  # save() reconciles and verifies the final live peer set.
+    ids = {c['id'] for c in clients}
+    state['clients'] = [c for c in state['clients'] if c['id'] not in ids]
+    save(state)
+    for target_client in clients:
+        addr = target_client.get('address')
+        if addr:
+            try:
+                run('conntrack', '-D', '-s', addr)
+            except Exception:
+                pass
+            try:
+                run('conntrack', '-D', '-d', addr)
+            except Exception:
+                pass
+            try:
+                run('ip', 'rule', 'del', 'from', f"{addr}/32", 'table', '100', 'priority', '14500')
+            except Exception:
+                pass
+
 def initialize():
     ROOT.mkdir(mode=0o700, parents=True, exist_ok=True)
     if not (ROOT / 'password').exists():
@@ -1303,17 +1331,21 @@ class Handler(BaseHTTPRequestHandler):
             elif self.path == '/api/clients/bulk':
                 ids = body.get('ids')
                 action = body.get('action')
-                if not isinstance(ids, list) or not 1 <= len(ids) <= 64 or action not in ('enable', 'disable'):
-                    raise ValueError('Select 1-64 clients and choose enable or disable.')
+                if not isinstance(ids, list) or not 1 <= len(ids) <= 64 or action not in ('enable', 'disable', 'delete'):
+                    raise ValueError('Select 1-64 clients and choose enable, disable or delete.')
                 if any(not isinstance(item, str) for item in ids):
                     raise ValueError('Invalid client selection.')
                 selected = [c for c in state['clients'] if c['id'] in ids]
                 if {c['id'] for c in selected} != set(ids):
                     raise ValueError('A selected client no longer exists.')
-                for client in selected:
-                    client['enabled'] = action == 'enable'
-                save(state)
-                audit(('Resumed ' if action == 'enable' else 'Paused ') + str(len(selected)) + ' client(s)')
+                if action == 'delete':
+                    delete_clients(state, selected)
+                    audit('Deleted ' + str(len(selected)) + ' client(s)')
+                else:
+                    for client in selected:
+                        client['enabled'] = action == 'enable'
+                    save(state)
+                    audit(('Resumed ' if action == 'enable' else 'Paused ') + str(len(selected)) + ' client(s)')
             elif tuning_match:
                 client = next((c for c in state['clients'] if c['id'] == tuning_match[1]), None)
                 if not client:
@@ -1391,27 +1423,7 @@ class Handler(BaseHTTPRequestHandler):
                 target_client = next((c for c in state['clients'] if c['id'] == target), None)
                 if not target_client:
                     return self.send(404, {'error': 'Client not found.'})
-                command, _, iface, _, _ = engine(state)
-                try:
-                    run(command, 'set', iface, 'peer', target_client['public'], 'remove')
-                except Exception:
-                    pass
-                addr = target_client.get('address')
-                if addr:
-                    try:
-                        run('conntrack', '-D', '-s', addr)
-                    except Exception:
-                        pass
-                    try:
-                        run('conntrack', '-D', '-d', addr)
-                    except Exception:
-                        pass
-                    try:
-                        run('ip', 'rule', 'del', 'from', f"{addr}/32", 'table', '100', 'priority', '14500')
-                    except Exception:
-                        pass
-                state['clients'] = [c for c in state['clients'] if c['id'] != target]
-                save(state)
+                delete_clients(state, [target_client])
                 audit('Revoked a client')
             elif self.path == '/api/update':
                 run('systemd-run', '--unit=wg-auto-update-' + str(int(time.time())), '/usr/local/sbin/wg-auto-update')

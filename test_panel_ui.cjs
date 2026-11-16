@@ -33,7 +33,8 @@ function snapshot(isAwg=false){const engineClients=isAwg?awgClients:clients;retu
   else if(url.pathname.endsWith('/qr.svg'))return route.fulfill({status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><path d="M0 0h100v100H0z" fill="white"/><path d="M10 10h20v20H10zM70 10h20v20H70zM10 70h20v20H10zM50 50h10v10H50z"/></svg>'});
   else if(url.pathname==='/api/clients'&&body){clients.push({...clients[0],id:'3123456789abcdef',name:body.name,address:'10.203.240.5',status:'new',handshake:0});}
   else if(url.pathname.endsWith('/details')){const c=clients.find(c=>url.pathname.includes(c.id));if('expiresAt' in body)c.expiresAt=body.expiresAt;if(body.name)c.name=body.name;if(typeof body.enabled==='boolean'){c.enabled=body.enabled;c.status=c.enabled?'recent':'paused';}}
-  else if(url.pathname==='/api/clients/bulk'){for(const c of clients)if(body.ids.includes(c.id)){c.enabled=body.action==='enable';c.status=c.enabled?'recent':'paused';}}
+  else if(url.pathname==='/api/clients/bulk'){if(body.action==='delete'){for(let i=clients.length-1;i>=0;i--)if(body.ids.includes(clients[i].id))clients.splice(i,1);}else for(const c of clients)if(body.ids.includes(c.id)){c.enabled=body.action==='enable';c.status=c.enabled?'recent':'paused';}}
+  else if(url.pathname==='/api/revoke'){const i=clients.findIndex(c=>c.id===body.id);if(i>=0)clients.splice(i,1);}
   else if(url.pathname==='/api/settings'){assert.equal(body.dns,dnsCatalog.begzar.dns);}
   else if(url.pathname==='/api/presets')savedPresetCount++;
   else if(url.pathname.endsWith('/tuning')){const c=clients.find(c=>url.pathname.includes(c.id));c.tuning={profile:body.profile,mtu:Number(body.mtu),keepalive:Number(body.keepalive),dns:body.dns||'1.1.1.1'};}
@@ -103,6 +104,11 @@ function snapshot(isAwg=false){const engineClients=isAwg?awgClients:clients;retu
   await page.evaluate(()=>{localStorage.removeItem('bk-festival');sessionStorage.removeItem('bk-festival-visit')});
   assert.equal(await page.evaluate(()=>scheduledTheme(new Date(2026,10,12,10,30))),'cute');
   assert.equal(await page.evaluate(()=>scheduledTheme(new Date(2026,10,12,16,30))),'spring');
-  assert.deepEqual(errors,[]);console.log('PASS: dashboard, search/filter, pause/resume, QR, low-MTU edit, create, presets, diagnostics, activity, theme, mobile overflow; no browser errors.');
+  await navigate('devices');await first().getByRole('button',{name:'Delete config',exact:true}).click();await page.locator('#confirm-dialog').getByRole('button',{name:'Cancel',exact:true}).click();assert.equal(clients.length,4);
+  await first().getByRole('button',{name:'Delete config',exact:true}).click();await page.locator('#confirm-submit').click();await page.waitForFunction(()=>STATE.clients.length===3&&!busy);assert.equal(await first().count(),0);
+  await page.locator('.peer-heading input[type=checkbox]').first().check();await page.locator('#bulk-delete').click();await page.locator('#confirm-submit').click();await page.waitForFunction(()=>STATE.clients.length===2&&!busy);assert.equal(await page.locator('.peer-card').count(),2);
+  for(let i=0;i<63;i++)clients.push({...awgClients[0],id:(100+i).toString(16).padStart(16,'0'),name:'Extra-'+i});await page.evaluate(()=>refresh(true));assert.equal(await page.locator('.peer-card').count(),65);
+  await page.locator('#select-all').check();await page.locator('#bulk-delete').click();await page.locator('#confirm-submit').click();await page.waitForFunction(()=>STATE.clients.length===0&&!busy);assert.equal(await page.locator('.peer-card').count(),0);assert.ok(await page.locator('#bulk-delete').isDisabled());
+  assert.deepEqual(errors,[]);console.log('PASS: dashboard, client actions, single/selected/all deletion, expiry, download retries, presets, responsive layout; no browser errors.');
  }finally{await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1});

@@ -92,6 +92,29 @@ class PanelApiTests(PanelTestBase):
         self.assertEqual(self.request('/api/revoke', {'id': created['id']}).status, 200)
         self.assertNotIn('new-public', panel.CONFIG.read_text())
         self.assertTrue(any(c[:2] == ('wg', 'syncconf') for c in self.commands))
+
+    def test_bulk_delete_removes_only_selected_clients_and_exports(self):
+        self.assertEqual(self.request('/api/clients', {'name': 'laptop'}).status, 200)
+        state = panel.load()
+        target = state['clients'][-1]['id']
+        self.assertEqual(self.request('/api/clients/bulk', {'ids': [target], 'action': 'delete'}, auth=False).status, 401)
+        self.assertEqual(self.request('/api/clients/bulk', {'ids': [target, 'missing'], 'action': 'delete'}).status, 400)
+        self.assertEqual(len(panel.load()['clients']), 2)
+        self.assertEqual(self.request('/api/clients/bulk', {'ids': [target], 'action': 'delete'}).status, 200)
+        self.assertEqual([c['id'] for c in panel.load()['clients']], ['0123456789abcdef'])
+        self.assertEqual(self.request('/api/clients/' + target + '/config').status, 404)
+        self.assertNotIn('new-public', panel.CONFIG.read_text())
+        self.assertIn('client-public', panel.CONFIG.read_text())
+        self.assertEqual(self.request('/api/clients/bulk', {'ids': ['0123456789abcdef'], 'action': 'delete'}).status, 200)
+        self.assertEqual(panel.load()['clients'], [])
+        self.assertIn('unmanaged', panel.CONFIG.read_text())
+    def test_awg_bulk_delete_preserves_wireguard_clients(self):
+        self.prepare_awg()
+        response = self.request('/api/awg/clients/bulk', {'ids': ['0123456789abcdef'], 'action': 'delete'})
+        self.assertEqual(response.status, 200)
+        self.assertEqual(panel.load('amneziawg')['clients'], [])
+        self.assertEqual(len(panel.load()['clients']), 1)
+
     def test_settings_validate_and_preserve_keys(self):
         body = dict(host='new.example.com', port=443, dns='9.9.9.9, 1.1.1.1', mtu=1360)
         before = panel.CONFIG.read_text()
