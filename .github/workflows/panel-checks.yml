@@ -19,6 +19,7 @@ jobs:
           - edge-cases
           - easter-egg
           - local
+          - uninstall
           - static
     steps:
       - uses: actions/checkout@v4
@@ -47,12 +48,18 @@ jobs:
       - name: Run local app tests
         if: matrix.suite == 'local'
         run: python3 -m unittest -v test_local_app.py
+      - name: Run uninstaller tests
+        if: matrix.suite == 'uninstall'
+        run: python3 -m unittest -v test_uninstall.py
       - name: Run static checks
         if: matrix.suite == 'static'
         run: |
           node -c web/panel.js
           python3 build_panel.py && git diff --exit-code panel.html
-          bash -n install.sh update.sh awg-install.sh test_awg_linux.sh test_e2e_real_tunnel.sh docker-entrypoint.sh
+          bash -n install.sh uninstall.sh update.sh awg-install.sh test_awg_linux.sh test_e2e_real_tunnel.sh docker-entrypoint.sh
+          bash uninstall.sh --help >/dev/null
+          bash uninstall.sh --dry-run >/dev/null
+          bash install.sh --help >/dev/null
   real-tunnel-e2e:
     name: Real Tunnel E2E (${{ matrix.arch }})
     needs: [panel]

@@ -223,6 +223,57 @@ sudo journalctl -u wg-auto-panel -n 50 -f
 
 ---
 
+## Uninstallation
+
+### Bare-Metal and Systemd Deployments
+
+To remove Blue Knight WG Panel, systemd units, network interfaces, and binaries, run the uninstallation script:
+
+```bash
+sudo ./uninstall.sh
+```
+
+Alternatively, invoke the uninstaller through the installer:
+
+```bash
+sudo ./install.sh --uninstall
+```
+
+To execute uninstallation with a single remote command:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/uninstall.sh | sudo bash
+```
+
+Available uninstallation flags:
+- `--purge`: Delete all client configurations, keys, and credentials (`/etc/wireguard`, `/etc/amnezia`, and `/root/wireguard-client.conf`).
+- `--dry-run`: Simulate uninstallation steps without deleting files or changing system state.
+- `-y`, `--yes`, `-f`, `--force`: Execute non-interactively without confirmation prompts.
+
+Example with full purge and non-interactive execution:
+
+```bash
+sudo ./uninstall.sh --yes --purge
+```
+
+### Docker Deployments
+
+Docker container deployments do not use `uninstall.sh`. Manage container removal directly with Docker Compose:
+
+Stop and remove panel containers:
+
+```bash
+docker compose down
+```
+
+To remove all persistent volumes and data directories:
+
+```bash
+docker compose down -v
+```
+
+---
+
 ## Development
 
 ```bash

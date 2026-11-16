@@ -2,6 +2,47 @@
 set -Eeuo pipefail
 umask 077
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'EOF'
+Usage: install.sh [OPTIONS]
+
+Install or configure Blue Knight WG Panel on Ubuntu or Debian.
+
+Options:
+  -h, --help               Display this help message and exit.
+  -u, --uninstall, uninstall Delegate execution to the uninstaller (uninstall.sh).
+
+Examples:
+  sudo ./install.sh
+  sudo ./install.sh --uninstall
+  ./install.sh --help
+EOF
+}
+
+# Handle help or uninstall delegation before root checking
+if [[ ${1:-} == -h || ${1:-} == --help ]]; then
+  usage
+  exit 0
+fi
+
+if [[ ${1:-} == uninstall || ${1:-} == --uninstall || ${1:-} == -u ]]; then
+  shift
+  script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  target="$script_dir/uninstall.sh"
+  if [[ ! -f "$target" ]]; then
+    target=$(mktemp /tmp/wg-auto-uninstall.XXXXXXXX.sh)
+    if ! curl -fsSL --retry 2 --connect-timeout 10 --max-time 30 \
+      https://raw.githubusercontent.com/BlueKnightNet/Blue-Knight-WG-Panel/blue-knight-net/uninstall.sh \
+      -o "$target"; then
+      rm -f "$target"
+      die 'Failed to download uninstall.sh.'
+    fi
+    trap 'rm -f "$target"' EXIT
+  fi
+  exec bash "$target" "$@"
+fi
+
 [[ $EUID -eq 0 ]] || die 'Run this installer with sudo bash.'
 [[ -r /etc/os-release ]] || die 'Only Debian/Ubuntu with systemd are supported.'
 . /etc/os-release
