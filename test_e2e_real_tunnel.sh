@@ -182,8 +182,8 @@ import datetime
 stage = sys.argv[1]
 srv_ns = sys.argv[2]
 
-def run_cmd(*args):
-    return subprocess.run(args, text=True, capture_output=True, check=True).stdout.strip()
+def run_cmd(*args, input=None):
+    return subprocess.run(args, input=input, text=True, capture_output=True, check=True).stdout.strip()
 
 # Check internet reachability to Cloudflare
 can_reach = False
