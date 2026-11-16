@@ -111,5 +111,108 @@ class WarpTests(PanelTestBase):
         self.assertTrue(any(c[:4] == ('ip', 'rule', 'add', 'from') and c[4].startswith(state['clients'][0]['address']) for c in self.commands))
 
 
+    def test_warp_status_endpoint(self):
+        # Unauthenticated request
+        self.assertEqual(self.request('/api/warp', auth=False).status, 401)
+
+        # Before installation
+        r = self.request('/api/warp')
+        self.assertEqual(r.status, 200)
+        status = json.load(r)
+        self.assertFalse(status['installed'])
+        self.assertFalse(status['active'])
+        self.assertFalse(status['workspaceWarp'])
+
+        # After installing warp info
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({
+            'ipv4': '172.16.0.2/32',
+            'endpoint': '162.159.192.1:2408'
+        }))
+        panel.atomic(panel.WARP_CONFIG, '[Interface]\nTable = off\n')
+        r = self.request('/api/warp')
+        self.assertEqual(r.status, 200)
+        status = json.load(r)
+        self.assertTrue(status['installed'])
+        self.assertTrue(status['registered'])
+        self.assertEqual(status['ipv4'], '172.16.0.2/32')
+        self.assertEqual(status['endpoint'], '162.159.192.1:2408')
+
+    def test_warp_toggle_enabling_and_disabling_policy_routing(self):
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({
+            'ipv4': '172.16.0.2/32',
+            'endpoint': '162.159.192.1:2408'
+        }))
+        panel.atomic(panel.WARP_CONFIG, '[Interface]\nTable = off\n')
+        self.commands.clear()
+
+        # Toggle ON
+        r = self.request('/api/warp', {'action': 'toggle'})
+        self.assertEqual(r.status, 200)
+        self.assertTrue(panel.load()['warpOutbound'])
+        self.assertTrue(any(c[:5] == ('ip', 'route', 'replace', 'default', 'dev') for c in self.commands))
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'add', 'from') and c[4] == '10.203.240.0/24' for c in self.commands))
+
+        # Toggle OFF
+        self.commands.clear()
+        r = self.request('/api/warp', {'action': 'toggle'})
+        self.assertEqual(r.status, 200)
+        self.assertFalse(panel.load()['warpOutbound'])
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'del', 'from') and c[4] == '10.203.240.0/24' for c in self.commands))
+
+    def test_settings_with_warp_outbound(self):
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({
+            'ipv4': '172.16.0.2/32',
+            'endpoint': '162.159.192.1:2408'
+        }))
+        panel.atomic(panel.WARP_CONFIG, '[Interface]\nTable = off\n')
+
+        # Update settings with warpOutbound = True
+        self.commands.clear()
+        r = self.request('/api/settings', {'host': 'vpn.example.com', 'port': 51820, 'mtu': 1280, 'dns': '1.1.1.1', 'warpOutbound': True})
+        self.assertEqual(r.status, 200)
+        self.assertTrue(panel.load()['warpOutbound'])
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'add', 'from') and c[4] == '10.203.240.0/24' for c in self.commands))
+
+        # Update settings with warpOutbound = False
+        self.commands.clear()
+        r = self.request('/api/settings', {'host': 'vpn.example.com', 'port': 51820, 'mtu': 1280, 'dns': '1.1.1.1', 'warpOutbound': False})
+        self.assertEqual(r.status, 200)
+        self.assertFalse(panel.load()['warpOutbound'])
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'del', 'from') and c[4] == '10.203.240.0/24' for c in self.commands))
+
+    def test_per_client_warp_override(self):
+        panel.atomic(panel.ROOT / 'warp.json', json.dumps({
+            'ipv4': '172.16.0.2/32',
+            'endpoint': '162.159.192.1:2408'
+        }))
+        panel.atomic(panel.WARP_CONFIG, '[Interface]\nTable = off\n')
+        path = '/api/clients/0123456789abcdef/tuning'
+
+        # Invalid warp value should be rejected
+        self.assertEqual(self.request(path, {'warp': 'unsupported'}).status, 400)
+
+        # Enable per-client warp override
+        self.commands.clear()
+        r = self.request(path, {'warp': 'enabled'})
+        self.assertEqual(r.status, 200)
+        client = panel.load()['clients'][0]
+        self.assertEqual(client.get('warp'), 'enabled')
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'add', 'from') and c[4].startswith('10.203.240.2') for c in self.commands))
+
+        # Disable per-client warp override
+        self.commands.clear()
+        r = self.request(path, {'warp': 'disabled'})
+        self.assertEqual(r.status, 200)
+        client = panel.load()['clients'][0]
+        self.assertEqual(client.get('warp'), 'disabled')
+        self.assertTrue(any(c[:4] == ('ip', 'rule', 'del', 'from') and c[4].startswith('10.203.240.2') for c in self.commands))
+
+        # Reset to default
+        r = self.request(path, {'warp': 'default'})
+        self.assertEqual(r.status, 200)
+        client = panel.load()['clients'][0]
+        self.assertEqual(client.get('warp'), 'default')
+
+
 if __name__ == '__main__':
     unittest.main()
