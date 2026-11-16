@@ -54,10 +54,10 @@ Create a separate device for each phone or computer. Recent handshakes show acti
 
 ## Optional: AmneziaWG
 
-1. Select **AmneziaWG 3.1** in the sidebar.
+1. Select **AmneziaWG** in the sidebar.
 2. Click **Install AmneziaWG** and wait for the build to finish.
 3. Open its displayed UDP port in your provider firewall.
-4. Create a device and import its config into an **AmneziaWG 3.1 compatible app**.
+4. Create a device and import its config into an **AmneziaWG compatible app**.
 
 AmneziaWG uses separate keys and settings. Its configs require a compatible client.
 

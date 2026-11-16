@@ -29,7 +29,7 @@ AWG_CONFIG = Path('/etc/amnezia/amneziawg/awgauto0.conf')
 AWG_BIN = '/opt/wg-auto/awg/bin/'
 AWG_HISTORY = []
 AWG_SAMPLES = {}
-AWG_KEYS = ('Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'S3', 'S4', 'H1', 'H2', 'H3', 'H4', 'HeaderProtectionKey', 'ContentPaddingAddition')
+AWG_KEYS = ('Jc', 'Jmin', 'Jmax', 'S1', 'S2', 'H1', 'H2', 'H3', 'H4')
 MUTATION_LOCK = threading.Lock()
 AUTH_LOCK = threading.Lock()
 AUTH_FAILURES = {}
@@ -37,35 +37,35 @@ METRICS_LOCK = threading.Lock()
 PEER_SAMPLES = {}
 TRAFFIC_HISTORY = []
 PROFILES = {
-    'small': dict(label='Small packets ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ IPv4 only', mtu=1200, keepalive=25),
-    'compatible': dict(label='Compatibility ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ smaller packets', mtu=1280, keepalive=25),
-    'balanced': dict(label='Balanced ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ try on stable connections', mtu=1360, keepalive=25),
-    'large': dict(label='Larger packets ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ test before using', mtu=1420, keepalive=25),
-    'idle': dict(label='Less idle traffic ط£آ¢أ¢â€ڑآ¬أ¢â‚¬â€Œ keepalive disabled', mtu=1280, keepalive=0),
+    'small': dict(label='Small packets — IPv4 only', mtu=1200, keepalive=25),
+    'compatible': dict(label='Compatibility — smaller packets', mtu=1280, keepalive=25),
+    'balanced': dict(label='Balanced — try on stable connections', mtu=1360, keepalive=25),
+    'large': dict(label='Larger packets — test before using', mtu=1420, keepalive=25),
+    'idle': dict(label='Less idle traffic — keepalive disabled', mtu=1280, keepalive=0),
 }
 # Curated IPv4 catalog; documentation is not a live reachability guarantee.
-DNS_PRESETS = {'shecan': {'label': 'Shecan / ط·آ·ط¢آ´ط·آ¹ط¢آ©ط·آ¸أ¢â‚¬آ ',
+DNS_PRESETS = {'shecan': {'label': 'Shecan / شکن',
             'dns': '178.22.122.100, 185.51.200.2',
             'region': 'Iran',
             'category': 'Anti-sanction',
             'source': 'https://t.me/s/shecan_ir',
             'note': 'Access can depend on source IP; test through your VPN.',
             'verification': 'Provider documented'},
- 'begzar': {'label': 'Begzar / ط·آ·ط¢آ¨ط·آ¹ط¢آ¯ط·آ·ط¢آ°ط·آ·ط¢آ±',
+ 'begzar': {'label': 'Begzar / بگذر',
             'dns': '185.55.226.26, 185.55.225.25, 185.55.224.24',
             'region': 'Iran',
             'category': 'Anti-sanction',
             'source': 'https://begzar.ir/',
             'note': 'For supported services; availability from a foreign VPS may differ.',
             'verification': 'Provider documented'},
- 'electro': {'label': 'Electro / ط·آ·ط¢آ§ط·آ¸أ¢â‚¬â€چط·آ¹ط¢آ©ط·آ·ط¹آ¾ط·آ·ط¢آ±ط·آ¸ط«â€ ',
+ 'electro': {'label': 'Electro / الکترو',
              'dns': '78.157.42.100, 78.157.42.101',
              'region': 'Iran',
              'category': 'Anti-sanction',
              'source': 'https://github.com/roozysoft/DNSs',
              'note': 'Legacy DNS addresses. Current service availability is unconfirmed.',
              'verification': 'Community listed / unverified'},
- '403': {'label': '403 / ط·ط›ط¢آ´ط·ط›ط¢آ°ط·ط›ط¢آ³',
+ '403': {'label': '403 / ۴۰۳',
          'dns': '10.202.10.202, 10.202.10.102',
          'region': 'Iran',
          'category': 'Network-only',
@@ -73,7 +73,7 @@ DNS_PRESETS = {'shecan': {'label': 'Shecan / ط·آ·ط¢آ´ط·آ¹ط¢آ©ط�
          'note': 'Private addresses: normally unreachable from a foreign VPS; requires a compatible Iranian '
                  'network route.',
          'verification': 'Community listed / unverified'},
- 'radar': {'label': 'Radar / ط·آ·ط¢آ±ط·آ·ط¢آ§ط·آ·ط¢آ¯ط·آ·ط¢آ§ط·آ·ط¢آ±',
+ 'radar': {'label': 'Radar / رادار',
            'dns': '10.202.10.10, 10.202.10.11',
            'region': 'Iran',
            'category': 'Network-only',
@@ -81,28 +81,28 @@ DNS_PRESETS = {'shecan': {'label': 'Shecan / ط·آ·ط¢آ´ط·آ¹ط¢آ©ط�
            'note': 'Private addresses: normally unreachable from a foreign VPS; requires a compatible '
                    'Iranian network route.',
            'verification': 'Community listed / unverified'},
- 'shelter': {'label': 'Shelter / ط·آ·ط¢آ´ط·آ¸أ¢â‚¬â€چط·آ·ط¹آ¾ط·آ·ط¢آ±',
+ 'shelter': {'label': 'Shelter / شلتر',
              'dns': '94.103.125.157, 94.103.125.158',
              'region': 'Iran',
              'category': 'Anti-sanction',
              'source': 'https://github.com/roozysoft/DNSs',
              'note': 'Provider documentation and current availability not confirmed.',
              'verification': 'Community listed / unverified'},
- 'beshkan': {'label': 'Beshkan / ط·آ·ط¢آ¨ط·آ·ط¢آ´ط·آ¹ط¢آ©ط·آ¸أ¢â‚¬آ ',
+ 'beshkan': {'label': 'Beshkan / بشکن',
              'dns': '181.41.194.177, 181.41.194.186',
              'region': 'Iran',
              'category': 'Anti-sanction',
              'source': 'https://github.com/roozysoft/DNSs',
              'note': 'Provider documentation and current availability not confirmed.',
              'verification': 'Community listed / unverified'},
- 'pishgaman': {'label': 'Pishgaman / ط·آ¸ط¢آ¾ط·ط›ط¥â€™ط·آ·ط¢آ´ط·آ¹ط¢آ¯ط·آ·ط¢آ§ط·آ¸أ¢â‚¬آ¦ط·آ·ط¢آ§ط·آ¸أ¢â‚¬آ ',
+ 'pishgaman': {'label': 'Pishgaman / پیشگامان',
                'dns': '5.202.100.100, 5.202.100.101',
                'region': 'Iran',
                'category': 'ISP',
                'source': 'https://github.com/roozysoft/DNSs',
                'note': 'May restrict clients by network. Public access is not confirmed.',
                'verification': 'Community listed / unverified'},
- 'shatel': {'label': 'Shatel / ط·آ·ط¢آ´ط·آ·ط¢آ§ط·آ·ط¹آ¾ط·آ¸أ¢â‚¬â€چ',
+ 'shatel': {'label': 'Shatel / شاتل',
             'dns': '85.15.1.14, 85.15.1.15',
             'region': 'Iran',
             'category': 'ISP',
@@ -317,8 +317,24 @@ def engine(state):
     return 'wg', 'wg-quick', IFACE, CONFIG, 'wg-quick@' + IFACE
 
 
+def sanitize_awg_header(header):
+    cleaned = []
+    for line in header.splitlines():
+        key = line.split('=', 1)[0].strip() if '=' in line else ''
+        if key in ('HeaderProtectionKey', 'ContentPaddingAddition', 'S3', 'S4'):
+            continue
+        cleaned.append(line)
+    return '\n'.join(cleaned)
+
+
 def load(protocol='wireguard'):
-    return json.loads(state_path({'protocol': protocol}).read_text())
+    state = json.loads(state_path({'protocol': protocol}).read_text())
+    if state.get('protocol') == 'amneziawg' and 'header' in state:
+        cleaned = sanitize_awg_header(state['header'])
+        if cleaned != state['header']:
+            state['header'] = cleaned
+            atomic(state_path(state), json.dumps(state))
+    return state
 
 
 def initialize_awg():
@@ -328,7 +344,7 @@ def initialize_awg():
         raise ValueError('Install AmneziaWG from the protocol card first.')
     base = load()
     parts = AWG_CONFIG.read_text().split('[Peer]')
-    header = parts[0].rstrip()
+    header = sanitize_awg_header(parts[0].rstrip())
     server = fields(header)
     state = dict(protocol='amneziawg', header=header, unmanaged=[block.strip() for block in parts[1:]], clients=[],
                  host=base['host'], port=int(server['ListenPort']), dns=base['dns'], mtu=1280,
@@ -393,8 +409,11 @@ def account_usage(state):
     rows = run(command, 'show', iface, 'transfer').splitlines()
     counters = {}
     for row in rows:
-        key, rx, tx = row.split()
-        counters[key] = (int(rx), int(tx))
+        if not row.strip():
+            continue
+        parts = row.split()
+        if len(parts) >= 3:
+            counters[parts[0]] = (int(parts[1]), int(parts[2]))
     changed = False
     for client in state['clients']:
         rx, tx = counters.get(client['public'], (0, 0))
@@ -430,7 +449,8 @@ def render_server(state):
         if not c.get('enabled', True) or limit_reason(c):
             continue
         blocks.append(f"PublicKey = {c['public']}\nPresharedKey = {c['psk']}\nAllowedIPs = {c['address']}/32")
-    return state['header'] + '\n\n' + ''.join('[Peer]\n' + b + '\n\n' for b in blocks)
+    header = sanitize_awg_header(state['header']) if state.get('protocol') == 'amneziawg' else state['header']
+    return header + '\n\n' + ''.join('[Peer]\n' + b + '\n\n' for b in blocks)
 
 
 def sync(text, state=None):
@@ -537,7 +557,7 @@ def set_tuning(client, body, state=None):
     else:
         raise ValueError('Unknown network profile.')
     if not 576 <= mtu <= 1420 or not 0 <= keepalive <= 120:
-        raise ValueError('MTU must be 1280ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“1420; keepalive must be 0ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“120 seconds.')
+        raise ValueError('MTU must be 1280–1420; keepalive must be 0–120 seconds.')
     dns = normalize_dns(body.get('dns', ''))
     client['tuning'] = dict(profile=profile, mtu=mtu, keepalive=keepalive, dns=dns)
 
@@ -557,7 +577,7 @@ def manage_preset(state, body):
         raise ValueError('Unknown preset action.')
     name = str(body.get('name', '')).strip()
     if not re.fullmatch(r'[A-Za-z0-9 _-]{1,40}', name):
-        raise ValueError('Preset names need 1ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“40 letters, numbers, spaces, underscores or hyphens.')
+        raise ValueError('Preset names need 1–40 letters, numbers, spaces, underscores or hyphens.')
     key = next((key for key, value in presets.items() if value['label'].lower() == name.lower()), None)
     if key is None and len(presets) >= 50:
         raise ValueError('Limit of 50 saved presets reached.')
@@ -567,14 +587,14 @@ def manage_preset(state, body):
     else:
         mtu, keepalive = int(body['mtu']), int(body['keepalive'])
         if not 576 <= mtu <= 1420 or not 0 <= keepalive <= 120:
-            raise ValueError('MTU must be 1280ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“1420; keepalive must be 0ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“120.')
+            raise ValueError('MTU must be 1280–1420; keepalive must be 0–120.')
         value = dict(label=name, mtu=mtu, keepalive=keepalive)
     presets[key] = value
 
 
 def share_uri(state, client):
     if state.get('protocol') == 'amneziawg':
-        raise ValueError('Use an AmneziaWG 3.1 compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
+        raise ValueError('Use an AmneziaWG compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
     tuning = effective_tuning(state, client)
     query = urlencode(dict(publickey=state['serverPublic'], presharedkey=client['psk'],
                            address=client['address'] + '/32', mtu=tuning['mtu'],
@@ -584,7 +604,7 @@ def share_uri(state, client):
 
 def xray_config(state, client):
     if state.get('protocol') == 'amneziawg':
-        raise ValueError('Use an AmneziaWG 3.1 compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
+        raise ValueError('Use an AmneziaWG compatible app and the native .conf or QR export. Standard WireGuard/Xray exports cannot preserve this protocol.')
     tuning = effective_tuning(state, client)
     dns = [x.strip() for x in tuning['dns'].split(',')]
     return dict(log=dict(loglevel='warning'), dns=dict(servers=dns, queryStrategy='UseIPv4'),
@@ -620,7 +640,8 @@ def diagnostics(state):
     except Exception:
         checks.append(dict(label='Outbound route', ok=False, detail='Could not determine the outbound interface'))
     port = fields(state['header'])['ListenPort']
-    check('WireGuard host firewall rule', ('iptables', '-C', 'INPUT', '-p', 'udp', '--dport', port, '-j', 'ACCEPT'))
+    check('AmneziaWG host firewall rule' if state.get('protocol') == 'amneziawg' else 'WireGuard host firewall rule',
+          ('iptables', '-C', 'INPUT', '-p', 'udp', '--dport', port, '-j', 'ACCEPT'))
     if wan:
         subnet = state['network']
         check('Outbound VPN forwarding rule', ('iptables', '-C', 'FORWARD', '-i', iface, '-o', wan, '-s', subnet, '-j', 'ACCEPT'))
@@ -765,7 +786,7 @@ def settings(state, body):
             raise ValueError('Invalid hostname or IPv4 address.')
     port, mtu = int(body['port']), int(body['mtu'])
     if not 1 <= port <= 65535 or not 576 <= mtu <= 1420:
-        raise ValueError('Port must be 1ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“65535; MTU must be 1280ط£آ¢أ¢â€ڑآ¬أ¢â‚¬إ“1420.')
+        raise ValueError('Port must be 1–65535; MTU must be 1280–1420.')
     dns = [str(ipaddress.ip_address(x.strip())) for x in str(body['dns']).split(',')]
     if not 1 <= len(dns) <= 3:
         raise ValueError('Provide one to three DNS IP addresses.')
@@ -853,12 +874,15 @@ class Handler(BaseHTTPRequestHandler):
                     command, _, iface, _, service = engine(state)
                     dump = run(command, 'show', iface, 'dump').splitlines()
                     for line in dump[1:]:
+                        if not line.strip():
+                            continue
                         p = line.split('\t')
-                        peers[p[0]] = dict(endpoint='' if p[2] == '(none)' else p[2], handshake=int(p[4]), received=int(p[5]), sent=int(p[6]))
+                        if len(p) >= 7:
+                            peers[p[0]] = dict(endpoint='' if p[2] == '(none)' else p[2], handshake=int(p[4]), received=int(p[5]), sent=int(p[6]))
                 except Exception:
                     error = 'VPN interface is unavailable. Check sudo systemctl status ' + engine(state)[4] + '.'
                 return self.send(200, dict(protocol=state.get('protocol', 'wireguard'), interface=engine(state)[2],
-                    obfuscation={k: v for k, v in fields(state['header']).items() if k in AWG_KEYS and k != 'HeaderProtectionKey'},
+                    obfuscation={k: v for k, v in fields(state['header']).items() if k in AWG_KEYS},
                     host=state['host'], port=state['port'], dns=state['dns'], mtu=state['mtu'],
                     profiles={**PROFILES, **state.get('connectionPresets', {})},
                     connectionPresets=state.get('connectionPresets', {}),
@@ -871,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
                 c = next((c for c in state['clients'] if c['id'] == match[1]), None)
                 if c:
                     if protocol == 'amneziawg' and match[2] not in ('config', 'qr.svg', 'dns.zip'):
-                        return self.send(400, {'error': 'AmneziaWG requires a compatible 3.1 app. Download its native config or QR.'})
+                        return self.send(400, {'error': 'AmneziaWG requires a compatible app. Download its native config or QR.'})
                     if match[2] == 'dns.zip':
                         presets = {**DNS_PRESETS, **state.get('dnsPresets', {})}
                         output = io.BytesIO()
@@ -902,7 +926,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send(500, {'error': 'Unable to read panel state. Check the service journal.'})
 
     def do_POST(self):
-        if not MUTATION_LOCK.acquire(blocking=False):
+        if not MUTATION_LOCK.acquire(timeout=5):
             return self.send(409, {'error': 'Another operation is running. Try again shortly.'})
         try:
             self.post_locked()
@@ -1053,7 +1077,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 # BEGIN EMBEDDED AWG INSTALLER
-AWG_INSTALL_SCRIPT = '#!/usr/bin/env bash\n# Embedded into panel.py by build_panel.py. Official sources, isolated native interface.\nset -Eeuo pipefail\numask 077\n[[ $EUID -eq 0 ]] || { echo \'Root is required.\' >&2; exit 1; }\n[[ -d /run/systemd/system && -c /dev/net/tun ]] || { echo \'A systemd VPS with /dev/net/tun is required.\' >&2; exit 1; }\n. /etc/os-release\n[[ $ID == ubuntu || $ID == debian ]] || { echo \'Ubuntu or Debian is required.\' >&2; exit 1; }\nexec 9>/run/wg-auto-awg-install.lock\nflock -n 9 || { echo \'An AmneziaWG install is running.\' >&2; exit 1; }\nexport DEBIAN_FRONTEND=noninteractive\nbase=/opt/wg-auto/awg\nconfig=/etc/amnezia/amneziawg/awgauto0.conf\ndata=/etc/wireguard/wg-auto-panel\nservice=wg-auto-awg\nif [[ -f $config ]]; then\n  [[ -f $data/awg-managed ]] || { echo \'Existing unmanaged AWG configuration found; refusing to overwrite it.\' >&2; exit 1; }\n  systemctl enable --now "$service"\n  /usr/bin/python3 /opt/wg-auto/current/panel.py --initialize-awg\n  exit 0\nfi\nip link show awgauto0 >/dev/null 2>&1 && { echo \'Interface awgauto0 already exists and is not managed by this panel.\' >&2; exit 1; }\ncase $(uname -m) in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; *) echo \'Supported CPU architectures: amd64 and arm64.\' >&2; exit 1;; esac\napt-get update\napt-get install -y build-essential pkg-config libmnl-dev ca-certificates curl tar iproute2 iptables qrencode\nstage=$(mktemp -d /opt/wg-auto/awg-build.XXXXXXXX)\ncreated=0\nsuccess=0\ncleanup() {\n  if (( created && ! success )); then\n    systemctl stop "$service" || true\n    systemctl disable "$service" || true\n    rm -f "$config" "$data/awg-managed"\n  fi\n  rm -rf -- "$stage"\n}\ntrap cleanup EXIT\n# Go\'s official download manifest includes a SHA256 for the platform archive.\ncurl -fsSL --retry 2 --connect-timeout 15 --max-time 60 \'https://go.dev/dl/?mode=json\' -o "$stage/go.json"\nread -r gofile gosum < <(python3 - "$stage/go.json" "$arch" <<\'PY\'\nimport json,sys\nversions=json.load(open(sys.argv[1]))\nfor version in versions:\n    if not version[\'stable\']: continue\n    for f in version[\'files\']:\n        if f[\'os\']==\'linux\' and f[\'arch\']==sys.argv[2] and f[\'kind\']==\'archive\':\n            print(f[\'filename\'], f[\'sha256\']); sys.exit(0)\nraise SystemExit(\'No matching Go toolchain\')\nPY\n)\n[[ $gofile =~ ^go[0-9.]+\\.linux-(amd64|arm64)\\.tar\\.gz$ && $gosum =~ ^[a-f0-9]{64}$ ]] || exit 1\ncurl -fsSL --retry 2 --connect-timeout 15 --max-time 600 "https://go.dev/dl/$gofile" -o "$stage/go.tgz"\nprintf \'%s  %s\\n\' "$gosum" "$stage/go.tgz" | sha256sum -c -\ntar -xzf "$stage/go.tgz" -C "$stage"\n# Reviewed upstream releases, pinned to immutable commits.\ngo_sha=b5928efb6ca19f0153958460c3d141f04abc5c2e\ntools_sha=ee0f0a9aa34ff0a0da4b3433b9512781cfe02843\nfor spec in "amneziawg-go:$go_sha" "amneziawg-tools:$tools_sha"; do\n  repo=${spec%:*}; sha=${spec#*:}\n  curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 "https://codeload.github.com/amnezia-vpn/$repo/tar.gz/$sha" -o "$stage/$repo.tgz"\n  mkdir "$stage/$repo"\n  tar -xzf "$stage/$repo.tgz" -C "$stage/$repo" --strip-components=1\ndone\nexport PATH="$stage/go/bin:$PATH"\nexport GOTOOLCHAIN=local\nexport GOCACHE="$stage/go-cache" GOPATH="$stage/go-path"\n(cd "$stage/amneziawg-go" && GOMAXPROCS=2 go build -p 1 -trimpath -o "$stage/amneziawg-go.bin" .)\nmake -C "$stage/amneziawg-tools/src" -j2\ninstall -d -m 700 "$base/bin" /etc/amnezia/amneziawg "$data"\ninstall -m 755 "$stage/amneziawg-go.bin" "$base/bin/amneziawg-go"\ninstall -m 755 "$stage/amneziawg-tools/src/wg" "$base/bin/awg"\n# Force the pinned Go engine; an older installed kernel module must not silently\n# consume a newer 3.1 configuration. Preserve upstream license/copyright headers.\npython3 - "$stage/amneziawg-tools/src/wg-quick/linux.bash" <<\'PY\'\nimport sys\nfrom pathlib import Path\np=Path(sys.argv[1]); source=p.read_text()\na=source.index(\'add_if() {\'); b=source.index(\'\\ndel_if() {\',a)\nsource=source[:a]+\'add_if() {\\n    cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}" "$INTERFACE"\\n}\\n\'+source[b:]\np.write_text(source)\nPY\ninstall -m 755 "$stage/amneziawg-tools/src/wg-quick/linux.bash" "$base/bin/awg-quick"\nprintf \'amneziawg-go %s\\namneziawg-tools %s\\n\' "$go_sha" "$tools_sha" > "$base/SOURCES"\n# Generate an unused /24 and UDP port without changing the original WireGuard.\nexport AWG_INSTALL_CONFIG="$config"\ncreated=1\npython3 - <<\'PY\'\nimport ipaddress,json,os,secrets,subprocess\nfrom pathlib import Path\ndef run(*args, data=None):\n    return subprocess.run(args,input=data,text=True,capture_output=True,check=True).stdout.strip()\nroutes=json.loads(run(\'ip\',\'-j\',\'-4\',\'route\',\'show\',\'table\',\'all\'))\nnets=[ipaddress.ip_network(r[\'dst\'],strict=False) for r in routes if r.get(\'dst\') not in (None,\'default\')]\nnet=next((ipaddress.ip_network(f\'10.204.{i}.0/24\') for i in range(240,255)\n          if not any(ipaddress.ip_network(f\'10.204.{i}.0/24\').overlaps(n) for n in nets)),None)\nif not net: raise SystemExit(\'No free AWG subnet found\')\nports={int(line.split()[3].rsplit(\':\',1)[-1]) for line in run(\'ss\',\'-H\',\'-lun\').splitlines() if line.split()[3].rsplit(\':\',1)[-1].isdigit()}\nport=next((p for p in range(51821,51922) if p not in ports),None)\nif not port: raise SystemExit(\'No free AWG UDP port found\')\nwan=json.loads(run(\'ip\',\'-j\',\'-4\',\'route\',\'get\',\'1.1.1.1\'))[0][\'dev\']\nimport re\nif not re.fullmatch(r\'[A-Za-z0-9_.:-]+\',wan): raise SystemExit(\'Invalid WAN interface\')\nawg=\'/opt/wg-auto/awg/bin/awg\'\nlines=[\'[Interface]\',f\'Address = {net.network_address+1}/24\',f\'ListenPort = {port}\',\n       \'PrivateKey = \'+run(awg,\'genkey\'),\'MTU = 1280\', \'Jc = 4\',\'Jmin = 40\',\'Jmax = 700\',\n       f\'S1 = {16+secrets.randbelow(16)}\',f\'S2 = {40+secrets.randbelow(16)}\',\'S3 = 64\',\'S4 = 16\',\n       \'HeaderProtectionKey = \'+run(awg,\'genkey\'),\'ContentPaddingAddition = 0-16\']\nheaders=secrets.SystemRandom().sample(range(100000,4294967295),4)\nlines += [f\'H{i} = {value}\' for i,value in enumerate(headers,1)]\nrules=[f\'INPUT -p udp --dport {port} -j ACCEPT\',\n       f\'FORWARD -i %i -o {wan} -s {net} -j ACCEPT\',\n       f\'FORWARD -i {wan} -o %i -d {net} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\']\nfor rule in rules:\n    lines += [\'PostUp = iptables -I \'+rule,\'PostDown = iptables -D \'+rule]\nlines += [f\'PostUp = iptables -t nat -A POSTROUTING -s {net} -o {wan} -j MASQUERADE\',\n          f\'PostDown = iptables -t nat -D POSTROUTING -s {net} -o {wan} -j MASQUERADE\']\npath=Path(os.environ[\'AWG_INSTALL_CONFIG\']);path.write_text(\'\\n\'.join(lines)+\'\\n\');path.chmod(0o600)\nPY\ncreated=1\ntouch "$data/awg-managed"\ncat > /etc/systemd/system/wg-auto-awg.service <<\'EOF\'\n[Unit]\nDescription=Diana native AmneziaWG interface\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nEnvironment=PATH=/opt/wg-auto/awg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nExecStart=/opt/wg-auto/awg/bin/awg-quick up /etc/amnezia/amneziawg/awgauto0.conf\nExecStop=/opt/wg-auto/awg/bin/awg-quick down /etc/amnezia/amneziawg/awgauto0.conf\nTimeoutStartSec=45\nUMask=0077\n[Install]\nWantedBy=multi-user.target\nEOF\nsysctl -w net.ipv4.ip_forward=1\nsystemctl daemon-reload\nsystemctl enable --now "$service"\n"$base/bin/awg" show awgauto0 public-key >/dev/null\n/usr/bin/python3 /opt/wg-auto/current/panel.py --initialize-awg\nsuccess=1\necho \'AmneziaWG is ready. Create an AmneziaWG device in Diana and import its config into an AmneziaWG 3.1 compatible app.\'\n'
+AWG_INSTALL_SCRIPT = '#!/usr/bin/env bash\n# Embedded into panel.py by build_panel.py. Official sources, isolated native interface.\nset -Eeuo pipefail\numask 077\n[[ $EUID -eq 0 ]] || { echo \'Root is required.\' >&2; exit 1; }\n[[ -d /run/systemd/system && -c /dev/net/tun ]] || { echo \'A systemd VPS with /dev/net/tun is required.\' >&2; exit 1; }\n. /etc/os-release\n[[ $ID == ubuntu || $ID == debian ]] || { echo \'Ubuntu or Debian is required.\' >&2; exit 1; }\nexec 9>/run/wg-auto-awg-install.lock\nflock -n 9 || { echo \'An AmneziaWG install is running.\' >&2; exit 1; }\nexport DEBIAN_FRONTEND=noninteractive\nbase=/opt/wg-auto/awg\nconfig=/etc/amnezia/amneziawg/awgauto0.conf\ndata=/etc/wireguard/wg-auto-panel\nservice=wg-auto-awg\nif [[ -f $config ]]; then\n  [[ -f $data/awg-managed ]] || { echo \'Existing unmanaged AWG configuration found; refusing to overwrite it.\' >&2; exit 1; }\n  systemctl enable --now "$service"\n  /usr/bin/python3 /opt/wg-auto/current/panel.py --initialize-awg\n  exit 0\nfi\nip link show awgauto0 >/dev/null 2>&1 && { echo \'Interface awgauto0 already exists and is not managed by this panel.\' >&2; exit 1; }\ncase $(uname -m) in x86_64) arch=amd64;; aarch64|arm64) arch=arm64;; *) echo \'Supported CPU architectures: amd64 and arm64.\' >&2; exit 1;; esac\napt-get update\napt-get install -y build-essential pkg-config libmnl-dev ca-certificates curl tar iproute2 iptables qrencode\nstage=$(mktemp -d /opt/wg-auto/awg-build.XXXXXXXX)\ncreated=0\nsuccess=0\ncleanup() {\n  if (( created && ! success )); then\n    systemctl stop "$service" || true\n    systemctl disable "$service" || true\n    rm -f "$config" "$data/awg-managed"\n  fi\n  rm -rf -- "$stage"\n}\ntrap cleanup EXIT\n# Go\'s official download manifest includes a SHA256 for the platform archive.\ncurl -fsSL --retry 2 --connect-timeout 15 --max-time 60 \'https://go.dev/dl/?mode=json\' -o "$stage/go.json"\nread -r gofile gosum < <(python3 - "$stage/go.json" "$arch" <<\'PY\'\nimport json,sys\nversions=json.load(open(sys.argv[1]))\nfor version in versions:\n    if not version[\'stable\']: continue\n    for f in version[\'files\']:\n        if f[\'os\']==\'linux\' and f[\'arch\']==sys.argv[2] and f[\'kind\']==\'archive\':\n            print(f[\'filename\'], f[\'sha256\']); sys.exit(0)\nraise SystemExit(\'No matching Go toolchain\')\nPY\n)\n[[ $gofile =~ ^go[0-9.]+\\.linux-(amd64|arm64)\\.tar\\.gz$ && $gosum =~ ^[a-f0-9]{64}$ ]] || exit 1\ncurl -fsSL --retry 2 --connect-timeout 15 --max-time 600 "https://go.dev/dl/$gofile" -o "$stage/go.tgz"\nprintf \'%s  %s\\n\' "$gosum" "$stage/go.tgz" | sha256sum -c -\ntar -xzf "$stage/go.tgz" -C "$stage"\n# Reviewed upstream releases, pinned to immutable commits.\ngo_sha=b5928efb6ca19f0153958460c3d141f04abc5c2e\ntools_sha=ee0f0a9aa34ff0a0da4b3433b9512781cfe02843\nfor spec in "amneziawg-go:$go_sha" "amneziawg-tools:$tools_sha"; do\n  repo=${spec%:*}; sha=${spec#*:}\n  curl -fsSL --retry 2 --connect-timeout 15 --max-time 120 "https://codeload.github.com/amnezia-vpn/$repo/tar.gz/$sha" -o "$stage/$repo.tgz"\n  mkdir "$stage/$repo"\n  tar -xzf "$stage/$repo.tgz" -C "$stage/$repo" --strip-components=1\ndone\nexport PATH="$stage/go/bin:$PATH"\nexport GOTOOLCHAIN=local\nexport GOCACHE="$stage/go-cache" GOPATH="$stage/go-path"\n(cd "$stage/amneziawg-go" && GOMAXPROCS=2 go build -p 1 -trimpath -o "$stage/amneziawg-go.bin" .)\nmake -C "$stage/amneziawg-tools/src" -j2\ninstall -d -m 700 "$base/bin" /etc/amnezia/amneziawg "$data"\ninstall -m 755 "$stage/amneziawg-go.bin" "$base/bin/amneziawg-go"\ninstall -m 755 "$stage/amneziawg-tools/src/wg" "$base/bin/awg"\n# Force the pinned Go engine; an older installed kernel module must not silently\n# consume a newer 3.1 configuration. Preserve upstream license/copyright headers.\npython3 - "$stage/amneziawg-tools/src/wg-quick/linux.bash" <<\'PY\'\nimport sys\nfrom pathlib import Path\np=Path(sys.argv[1]); source=p.read_text()\na=source.index(\'add_if() {\'); b=source.index(\'\\ndel_if() {\',a)\nsource=source[:a]+\'add_if() {\\n    cmd "${WG_QUICK_USERSPACE_IMPLEMENTATION:-amneziawg-go}" "$INTERFACE"\\n}\\n\'+source[b:]\np.write_text(source)\nPY\ninstall -m 755 "$stage/amneziawg-tools/src/wg-quick/linux.bash" "$base/bin/awg-quick"\nprintf \'amneziawg-go %s\\namneziawg-tools %s\\n\' "$go_sha" "$tools_sha" > "$base/SOURCES"\n# Generate an unused /24 and UDP port without changing the original WireGuard.\nexport AWG_INSTALL_CONFIG="$config"\ncreated=1\npython3 - <<\'PY\'\nimport ipaddress,json,os,secrets,subprocess\nfrom pathlib import Path\ndef run(*args, data=None):\n    return subprocess.run(args,input=data,text=True,capture_output=True,check=True).stdout.strip()\nroutes=json.loads(run(\'ip\',\'-j\',\'-4\',\'route\',\'show\',\'table\',\'all\'))\nnets=[ipaddress.ip_network(r[\'dst\'],strict=False) for r in routes if r.get(\'dst\') not in (None,\'default\')]\nnet=next((ipaddress.ip_network(f\'10.204.{i}.0/24\') for i in range(240,255)\n          if not any(ipaddress.ip_network(f\'10.204.{i}.0/24\').overlaps(n) for n in nets)),None)\nif not net: raise SystemExit(\'No free AWG subnet found\')\nports={int(line.split()[3].rsplit(\':\',1)[-1]) for line in run(\'ss\',\'-H\',\'-lun\').splitlines() if line.split()[3].rsplit(\':\',1)[-1].isdigit()}\nport=next((p for p in range(51821,51922) if p not in ports),None)\nif not port: raise SystemExit(\'No free AWG UDP port found\')\nwan=json.loads(run(\'ip\',\'-j\',\'-4\',\'route\',\'get\',\'1.1.1.1\'))[0][\'dev\']\nimport re\nif not re.fullmatch(r\'[A-Za-z0-9_.:-]+\',wan): raise SystemExit(\'Invalid WAN interface\')\nawg=\'/opt/wg-auto/awg/bin/awg\'\nlines=[\'[Interface]\',f\'Address = {net.network_address+1}/24\',f\'ListenPort = {port}\',\n       \'PrivateKey = \'+run(awg,\'genkey\'),\'MTU = 1280\', \'Jc = 4\',\'Jmin = 40\',\'Jmax = 700\',\n       f\'S1 = {16+secrets.randbelow(16)}\',f\'S2 = {40+secrets.randbelow(16)}\']\nheaders=secrets.SystemRandom().sample(range(100000,4294967295),4)\nlines += [f\'H{i} = {value}\' for i,value in enumerate(headers,1)]\nrules=[f\'INPUT -p udp --dport {port} -j ACCEPT\',\n       f\'FORWARD -i %i -o {wan} -s {net} -j ACCEPT\',\n       f\'FORWARD -i {wan} -o %i -d {net} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT\']\nfor rule in rules:\n    lines += [\'PostUp = iptables -I \'+rule,\'PostDown = iptables -D \'+rule]\nlines += [f\'PostUp = iptables -t nat -A POSTROUTING -s {net} -o {wan} -j MASQUERADE\',\n          f\'PostDown = iptables -t nat -D POSTROUTING -s {net} -o {wan} -j MASQUERADE\']\npath=Path(os.environ[\'AWG_INSTALL_CONFIG\']);path.write_text(\'\\n\'.join(lines)+\'\\n\');path.chmod(0o600)\nPY\ncreated=1\ntouch "$data/awg-managed"\ncat > /etc/systemd/system/wg-auto-awg.service <<\'EOF\'\n[Unit]\nDescription=Diana native AmneziaWG interface\nAfter=network-online.target\nWants=network-online.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nEnvironment=PATH=/opt/wg-auto/awg/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin\nExecStart=/opt/wg-auto/awg/bin/awg-quick up /etc/amnezia/amneziawg/awgauto0.conf\nExecStop=/opt/wg-auto/awg/bin/awg-quick down /etc/amnezia/amneziawg/awgauto0.conf\nTimeoutStartSec=45\nUMask=0077\n[Install]\nWantedBy=multi-user.target\nEOF\nsysctl -w net.ipv4.ip_forward=1\nsystemctl daemon-reload\nsystemctl enable --now "$service"\n"$base/bin/awg" show awgauto0 public-key >/dev/null\n/usr/bin/python3 /opt/wg-auto/current/panel.py --initialize-awg\nsuccess=1\necho \'AmneziaWG is ready. Create an AmneziaWG device in Diana and import its config into an AmneziaWG compatible app.\'\n'
 # END EMBEDDED AWG INSTALLER
 
 

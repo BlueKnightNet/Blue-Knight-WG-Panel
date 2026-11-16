@@ -103,8 +103,7 @@ if not re.fullmatch(r'[A-Za-z0-9_.:-]+',wan): raise SystemExit('Invalid WAN inte
 awg='/opt/wg-auto/awg/bin/awg'
 lines=['[Interface]',f'Address = {net.network_address+1}/24',f'ListenPort = {port}',
        'PrivateKey = '+run(awg,'genkey'),'MTU = 1280', 'Jc = 4','Jmin = 40','Jmax = 700',
-       f'S1 = {16+secrets.randbelow(16)}',f'S2 = {40+secrets.randbelow(16)}','S3 = 64','S4 = 16',
-       'HeaderProtectionKey = '+run(awg,'genkey'),'ContentPaddingAddition = 0-16']
+       f'S1 = {16+secrets.randbelow(16)}',f'S2 = {40+secrets.randbelow(16)}']
 headers=secrets.SystemRandom().sample(range(100000,4294967295),4)
 lines += [f'H{i} = {value}' for i,value in enumerate(headers,1)]
 rules=[f'INPUT -p udp --dport {port} -j ACCEPT',
@@ -140,4 +139,4 @@ systemctl enable --now "$service"
 "$base/bin/awg" show awgauto0 public-key >/dev/null
 /usr/bin/python3 /opt/wg-auto/current/panel.py --initialize-awg
 success=1
-echo 'AmneziaWG is ready. Create an AmneziaWG device in Diana and import its config into an AmneziaWG 3.1 compatible app.'
+echo 'AmneziaWG is ready. Create an AmneziaWG device in Diana and import its config into an AmneziaWG compatible app.'
