@@ -5,6 +5,9 @@ set -Eeuo pipefail
 
 [[ $EUID -eq 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 
+# Verify Linux TUN device required for WireGuard / AmneziaWG userspace engines
+[[ -c /dev/net/tun ]] || { echo 'Linux TUN device /dev/net/tun is missing or not a character device.' >&2; exit 1; }
+
 bin=${1:?Pass path to directory containing built awg and amneziawg-go}
 bin=$(realpath "$bin")
 
@@ -33,9 +36,13 @@ srv_wg_pid=''
 cli_wg_pid=''
 srv_awg_pid=''
 cli_awg_pid=''
+srv_http_pid=''
 
 cleanup() {
   local exit_code=$?
+  if [[ -n "$srv_http_pid" ]]; then
+    kill "$srv_http_pid" 2>/dev/null || true
+  fi
   if [[ -n "$srv_awg_pid" ]]; then
     kill "$srv_awg_pid" 2>/dev/null || true
   fi
