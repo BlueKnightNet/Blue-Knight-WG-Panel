@@ -99,8 +99,8 @@ function snapshot(isAwg=false){const engineClients=isAwg?awgClients:clients;retu
   }
   await page.setViewportSize({width:1440,height:1100});await page.evaluate(()=>setTheme('dawn'));await navigate('overview');await page.screenshot({path:path.join(require('node:os').tmpdir(),'diana-light-fixture.png'),fullPage:true});
   await page.setViewportSize({width:390,height:844});await page.evaluate(()=>setTheme('night'));await navigate('overview');await page.screenshot({path:path.join(require('node:os').tmpdir(),'diana-mobile-overview-fixture.png'),fullPage:true});
-  await navigate('network');await page.locator('#dev-mode').check();
-  for(const theme of ['spring','horror','cute','festival','gothic']){await page.locator('#theme-preview').selectOption(theme);assert.equal(await page.locator('html').getAttribute('data-theme'),theme);}
+  await navigate('network');assert.equal(await page.locator('#dev-mode, #theme-preview').count(),0);
+  for(const theme of ['spring','horror','cute','festival','gothic']){await page.evaluate(t=>setTheme(t),theme);assert.equal(await page.locator('html').getAttribute('data-theme'),theme);}
   await page.evaluate(()=>{localStorage.removeItem('bk-festival');sessionStorage.removeItem('bk-festival-visit')});
   assert.equal(await page.evaluate(()=>scheduledTheme(new Date(2026,10,12,10,30))),'cute');
   assert.equal(await page.evaluate(()=>scheduledTheme(new Date(2026,10,12,16,30))),'spring');

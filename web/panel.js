@@ -145,14 +145,9 @@ for(const item of document.querySelectorAll('[data-view]'))item.addEventListener
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&$('#menu-toggle').getAttribute('aria-expanded')==='true'){setNavigation(false);$('#menu-toggle').focus()}if(event.key==='Tab'&&mobileNavigation.matches&&$('#menu-toggle').getAttribute('aria-expanded')==='true'){const nodes=[...$('#navigation').querySelectorAll('a,button,select')].filter(n=>!n.disabled&&n.getClientRects().length);if(event.shiftKey&&document.activeElement===nodes[0]){event.preventDefault();nodes.at(-1).focus()}else if(!event.shiftKey&&document.activeElement===nodes.at(-1)){event.preventDefault();nodes[0].focus()}}});
 setNavigation(false);
 
-$('#dev-mode').onchange=()=>{$('#theme-preview-label').hidden=!$('#dev-mode').checked;$('#theme-preview').value=document.documentElement.dataset.theme};
-$('#theme-preview').onchange=()=>setTheme($('#theme-preview').value);
 $('#change-password').onsubmit=e=>{e.preventDefault();const form=e.target;if(form.elements.password.value!==form.elements.confirm.value)return message('New passwords do not match.',true);action(async()=>{await api('/api/password',{current:form.elements.current.value,password:form.elements.password.value});form.reset();message('Password changed. Sign in again as admin using your new password.');})};
 
 // Schedules use browser-local time. Random night choices persist across reloads.
-let manualPreview=false;
-const preview=$('#theme-preview');
-const themeNames=['night','dawn','spring','horror','cute','festival','gothic'];
 function scheduledTheme(now=new Date()){
  const hour=now.getHours(), night=new Date(now.getFullYear(),now.getMonth(),now.getDate());
  try{
@@ -165,10 +160,8 @@ function scheduledTheme(now=new Date()){
  if(hour>=10&&hour<11)return 'cute';if(hour>=16&&hour<18)return 'spring';return null;
 }
 let baseTheme='night';try{baseTheme=localStorage.getItem('bk-base-theme')==='dawn'?'dawn':'night'}catch{}
-function applySchedule(){if(manualPreview)return;setTheme(scheduledTheme()||baseTheme);preview.value=document.documentElement.dataset.theme}
-preview.onchange=()=>{manualPreview=true;setTheme(preview.value)};
-$('#dev-mode').onchange=()=>{$('#theme-preview-label').hidden=!$('#dev-mode').checked;preview.value=document.documentElement.dataset.theme;if(!$('#dev-mode').checked){manualPreview=false;applySchedule()}};
-$('#theme').onclick=()=>{baseTheme=document.documentElement.dataset.theme==='dawn'?'night':'dawn';manualPreview=true;try{localStorage.setItem('bk-base-theme',baseTheme)}catch{}setTheme(baseTheme)};
+function applySchedule(){setTheme(scheduledTheme()||baseTheme)}
+$('#theme').onclick=()=>{baseTheme=baseTheme==='dawn'?'night':'dawn';try{localStorage.setItem('bk-base-theme',baseTheme)}catch{}applySchedule()};
 applySchedule();setInterval(applySchedule,60000);
 
 function limitsEditor(client){
