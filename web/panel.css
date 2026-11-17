@@ -111,3 +111,6 @@ main,.surface,.notice{min-width:0;overflow-wrap:anywhere}
  :root[data-theme] .hero{background-position:right top}
  .sidebar-bottom #theme-label{display:inline}
 }
+
+/* Keep the theme picker hidden until developer mode is enabled. */
+#theme-preview-label[hidden]{display:none}
