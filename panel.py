@@ -1151,6 +1151,13 @@ class PanelServer(ThreadingHTTPServer):
                 return
             with self.tls_context.wrap_socket(sock, server_side=True) as secured:
                 super().finish_request(secured, address)
+                # Send TLS close_notify after the complete response, rather than
+                # abruptly closing the encrypted connection on context exit.
+                try:
+                    secured.settimeout(2)
+                    secured.unwrap().close()
+                except (OSError, ValueError):
+                    pass
         except (ssl.SSLError, TimeoutError, ConnectionError):
             # Browser certificate rejection, scanners and interrupted handshakes
             # are connection failures, not application failures.
@@ -1181,15 +1188,21 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         super().setup()
         self.connection.settimeout(15)
+        self.response_started = False
 
     def log_message(self, *args):
         pass  # Do not log download URLs or credentials.
 
     def send(self, code, body, kind='application/json', filename=None):
+        if self.response_started:
+            # A failed body transfer cannot be followed by a second HTTP response.
+            self.close_connection = True
+            return
         if not isinstance(body, (str, bytes)):
             body = json.dumps(body)
         if isinstance(body, str):
             body = body.encode()
+        self.response_started = True
         self.send_response(code)
         self.send_header('Content-Type', kind)
         self.send_header('Cache-Control', 'no-store')
@@ -1202,7 +1215,17 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header('Content-Disposition', f'attachment; filename="{filename}"')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        # The bundled page contains artwork/fonts and exceeds 2 MB. A single
+        # sendall() gives the ENTIRE transfer the request's 15-second timeout.
+        # Bound each write instead, allowing slow connections to make progress.
+        previous_timeout = self.connection.gettimeout()
+        self.connection.settimeout(60)
+        try:
+            for offset in range(0, len(body), 64 * 1024):
+                self.wfile.write(body[offset:offset + 64 * 1024])
+            self.wfile.flush()
+        finally:
+            self.connection.settimeout(previous_timeout)
 
     def authorized(self):
         address, now = self.client_address[0], time.monotonic()

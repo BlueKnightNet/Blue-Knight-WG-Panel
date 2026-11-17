@@ -6,9 +6,11 @@ import json
 import os
 from pathlib import Path
 import shutil
+import socket
 import ssl
 import subprocess
 import threading
+import time
 import unittest
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -412,6 +414,36 @@ class PanelApiTests(PanelTestBase):
             with urlopen(request, context=context, timeout=5) as r:
                 self.assertEqual(r.status, 200)
                 self.assertEqual(json.load(r)['host'], 'vpn.example.com')
+            # Exercise the multi-megabyte HTML over real TLS, including EOF.
+            expected = Path(panel.__file__).with_name('panel.html').read_bytes()
+            for attempt in range(3):
+                request = Request(url.rsplit('/api/status', 1)[0] + '/', headers={
+                    'Authorization': 'Basic ' + base64.b64encode(b'admin:test-password').decode()})
+                with urlopen(request, context=context, timeout=10) as r:
+                    received = r.read()
+                    self.assertEqual(len(received), int(r.headers['Content-Length']))
+                    self.assertEqual(received, expected)
+            # Apply backpressure for longer than the former 15-second deadline.
+            original_get_request = https.get_request
+            def small_send_buffer():
+                sock, address = original_get_request()
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 8192)
+                return sock, address
+            with patch.object(https, 'get_request', side_effect=small_send_buffer):
+                slow = http.client.HTTPSConnection('127.0.0.1', https.server_port, context=context, timeout=10)
+                try:
+                    slow.request('GET', '/', headers={'Authorization': 'Basic ' + base64.b64encode(b'admin:test-password').decode()})
+                    response = slow.getresponse()
+                    received = bytearray()
+                    started = time.monotonic()
+                    while block := response.read(16384):
+                        received.extend(block)
+                        time.sleep(0.12)
+                    self.assertGreater(time.monotonic() - started, 15)
+                    self.assertEqual(len(received), int(response.getheader('Content-Length')))
+                    self.assertEqual(received, expected)
+                finally:
+                    slow.close()
             first_key = (panel.ROOT / 'tls.key').read_bytes()
         finally:
             https.shutdown()
