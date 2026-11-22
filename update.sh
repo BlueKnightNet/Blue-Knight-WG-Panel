@@ -51,6 +51,8 @@ Restart=on-failure
 RestartSec=3
 UMask=0077
 Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TELEGRAM_BOT_TOKEN=
+Environment=TELEGRAM_ADMIN_CHAT_IDS=
 ExecStartPre=/bin/sh -c '/usr/sbin/iptables -C INPUT -p tcp --dport 8787 -m comment --comment wg-auto-panel -j ACCEPT 2>/dev/null || /usr/sbin/iptables -I INPUT 1 -p tcp --dport 8787 -m comment --comment wg-auto-panel -j ACCEPT'
 ExecStopPost=/bin/sh -c '/usr/sbin/iptables -D INPUT -p tcp --dport 8787 -m comment --comment wg-auto-panel -j ACCEPT 2>/dev/null || true'
 
