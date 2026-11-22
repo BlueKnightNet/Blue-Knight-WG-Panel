@@ -24,6 +24,11 @@ import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from urllib.parse import quote, urlencode
 
+try:
+    from telegram_bot import BOT as TELEGRAM_BOT
+except Exception:
+    TELEGRAM_BOT = None
+
 ROOT = Path(os.environ.get('WG_AUTO_DATA', '/etc/wireguard/wg-auto-panel'))
 CONFIG = Path(os.environ.get('WG_AUTO_CONFIG', '/etc/wireguard/wgauto0.conf'))
 ORIGINAL_CLIENT = Path('/root/wireguard-client.conf')
@@ -736,7 +741,8 @@ def initialize():
     state = dict(header=parts[0].rstrip(), unmanaged=[], clients=[], host=host, port=int(port),
                  dns=client.get('DNS', '1.1.1.1, 1.0.0.1'), mtu=int(client.get('MTU', '1280')),
                  serverPublic=run('wg', 'pubkey', data=server['PrivateKey'] + '\n'),
-                 network=str(ipaddress.ip_interface(server['Address']).network))
+                 network=str(ipaddress.ip_interface(server['Address']).network),
+                 telegram=dict(token='', admin_chat_ids=[]))
     client_pub = run('wg', 'pubkey', data=client['PrivateKey'] + '\n') if client.get('PrivateKey') else None
     for block in parts[1:]:
         peer = fields(block)
@@ -1281,6 +1287,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200, diagnostics(state))
             if self.path == '/api/warp':
                 return self.send(200, {**warp_status(), 'workspaceWarp': state.get('warpOutbound', False)})
+            if self.path == '/api/telegram':
+                tg = state.get('telegram', {})
+                token = tg.get('token', '')
+                masked = (token[:6] + '...' + token[-4:]) if token else ''
+                return self.send(200, {'configured': bool(token), 'token': masked,
+                    'admin_chat_ids': tg.get('admin_chat_ids', [])})
             if self.path == '/api/status':
                 peers, error = {}, None
                 try:
@@ -1539,6 +1551,36 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     raise ValueError('Unknown WARP action.')
                 return self.send(200, {**warp_status(), 'workspaceWarp': state.get('warpOutbound', False)})
+            elif self.path == '/api/telegram':
+                action = body.get('action')
+                if action == 'setup':
+                    token = str(body.get('token', '')).strip()
+                    raw_ids = body.get('admin_chat_ids', [])
+                    if not isinstance(raw_ids, list):
+                        raise ValueError('admin_chat_ids must be a list of numbers.')
+                    admin_ids = []
+                    for x in raw_ids:
+                        if not isinstance(x, int) or isinstance(x, bool):
+                            raise ValueError('admin_chat_ids must contain integers.')
+                        admin_ids.append(int(x))
+                    if token and not re.fullmatch(r'\d+:[A-Za-z0-9_-]+', token):
+                        raise ValueError('Invalid bot token format.')
+                    state['telegram'] = {'token': token, 'admin_chat_ids': admin_ids}
+                    save(state)
+                    if TELEGRAM_BOT:
+                        TELEGRAM_BOT.reconfigure(token, set(admin_ids))
+                    audit('Configured Telegram bot')
+                    return self.send(200, {'ok': True, 'configured': bool(token),
+                        'admin_chat_ids': admin_ids})
+                elif action == 'reset':
+                    state['telegram'] = {'token': '', 'admin_chat_ids': []}
+                    save(state)
+                    if TELEGRAM_BOT:
+                        TELEGRAM_BOT.reconfigure(None, set())
+                    audit('Reset Telegram bot configuration')
+                    return self.send(200, {'ok': True, 'configured': False, 'admin_chat_ids': []})
+                else:
+                    raise ValueError('Unknown Telegram action.')
             elif self.path == '/api/clients':
                 name = str(body.get('name', '')).strip()
                 if not re.fullmatch(r'[A-Za-z0-9_-]{1,40}', name):
@@ -1616,4 +1658,26 @@ if __name__ == '__main__':
     server = make_server()
     server.timeout = 15
     server.socket.settimeout(15)
+    if TELEGRAM_BOT:
+        try:
+            state = load()
+            tg = state.get('telegram', {})
+            token = os.environ.get("TELEGRAM_BOT_TOKEN") or tg.get('token', '')
+            admin_ids = set()
+            raw = os.environ.get("TELEGRAM_ADMIN_CHAT_IDS", "")
+            if raw:
+                for part in raw.split(","):
+                    part = part.strip()
+                    if part:
+                        try:
+                            admin_ids.add(int(part))
+                        except ValueError:
+                            pass
+            else:
+                admin_ids = {int(x) for x in tg.get('admin_chat_ids', []) if str(x).isdigit()}
+            if token:
+                TELEGRAM_BOT.start(token, admin_ids)
+                print("Telegram bot polling started.")
+        except Exception:
+            traceback.print_exc()
     server.serve_forever()

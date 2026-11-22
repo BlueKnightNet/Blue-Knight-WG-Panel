@@ -22,6 +22,9 @@ SHELL ["/bin/bash", "-c"]
 
 WORKDIR /app
 COPY . .
+ENV TELEGRAM_BOT_TOKEN=""
+ENV TELEGRAM_ADMIN_CHAT_IDS=""
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Build pinned AmneziaWG binaries
 RUN mkdir -p /opt/diana-awg/go /opt/diana-awg/tools /opt/diana-awg/bin && \
